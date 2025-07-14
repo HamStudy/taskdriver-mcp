@@ -116,15 +116,24 @@ export class TaskTypeService {
 
   /**
    * Validate that a task type exists and belongs to the specified project
+   * Supports lookup by ID or name
    */
-  async validateTaskType(typeId: string, projectId: string): Promise<TaskType> {
-    const taskType = await this.storage.getTaskType(typeId);
+  async validateTaskType(typeIdOrName: string, projectId: string): Promise<TaskType> {
+    // First try to get by ID
+    let taskType = await this.storage.getTaskType(typeIdOrName);
+    
+    // If not found by ID, try to find by name within the project
     if (!taskType) {
-      throw new Error(`Task type ${typeId} not found`);
+      const taskTypes = await this.storage.listTaskTypes(projectId);
+      taskType = taskTypes.find(tt => tt.name === typeIdOrName) || null;
+    }
+    
+    if (!taskType) {
+      throw new Error(`Task type ${typeIdOrName} not found`);
     }
 
     if (taskType.projectId !== projectId) {
-      throw new Error(`Task type ${typeId} does not belong to project ${projectId}`);
+      throw new Error(`Task type ${typeIdOrName} does not belong to project ${projectId}`);
     }
 
     return taskType;

@@ -66,7 +66,9 @@ export interface TaskResult {
 }
 
 export interface TaskInput {
-  typeId: string;
-  instructions: string;
-  variables?: Record<string, string>;
+  type: string;
+  instructions?: string;
+  vars?: Record<string, string>;
+  id?: string;
+  description?: string;
 }

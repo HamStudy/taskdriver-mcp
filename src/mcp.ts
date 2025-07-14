@@ -12,24 +12,24 @@ import {
   CallToolRequestSchema 
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadConfig } from './config/index.js';
-import { FileStorageProvider } from './storage/FileStorageProvider.js';
-import { allTools } from './tools/index.js';
-import { ToolHandlers } from './tools/handlers.js';
+import { createStorageProvider } from './storage/index.js';
+import { tools } from './tools/generated.js';
+import { GeneratedToolHandlers } from './tools/generated.js';
 
 export async function runMCPServer() {
   console.error('🚀 Starting TaskDriver MCP Server...');
   
   // Load configuration
   const config = loadConfig();
-  console.error(`📁 Data directory: ${config.storage.fileStorage?.dataDir || './data'}`);
+  console.error(`📁 Storage type: ${config.storage.provider}`);
   
   // Initialize storage provider
-  const storage = new FileStorageProvider(config.storage.fileStorage?.dataDir || './data');
+  const storage = createStorageProvider(config);
   await storage.initialize();
   console.error('💾 Storage provider initialized');
   
   // Initialize tool handlers
-  const toolHandlers = new ToolHandlers(storage);
+  const toolHandlers = new GeneratedToolHandlers(storage);
   
   // Create MCP server
   const server = new Server(
@@ -47,7 +47,7 @@ export async function runMCPServer() {
   // Register all tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
-      tools: allTools
+      tools: tools
     };
   });
 
@@ -61,7 +61,7 @@ export async function runMCPServer() {
   await server.connect(transport);
   
   console.error('✅ TaskDriver MCP Server is running');
-  console.error(`🔧 ${allTools.length} tools registered`);
+  console.error(`🔧 ${tools.length} tools registered`);
   console.error('📡 Waiting for LLM agent connections...');
   
   // Graceful shutdown

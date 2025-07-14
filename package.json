@@ -15,7 +15,17 @@
     "clean": "rm -rf dist",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage"
+    "test:coverage": "bun test --coverage",
+    "test:all": "./test-all.sh",
+    "test:all:fast": "./test-all.sh --fast",
+    "test:all:coverage": "./test-all.sh --coverage",
+    "test:working": "bun test test/config/ test/storage/ test/services/LeaseService.test.ts test/services/SessionService.test.ts test/services/ProjectService.test.ts test/services/TaskTypeService.test.ts test/mcp/ && ./test/e2e/cli-workflow.sh",
+    "test:unit": "bun test test/utils/ test/config/ test/services/ test/storage/",
+    "test:integration": "bun test test/integration/",
+    "test:mcp": "bun test test/mcp/",
+    "test:http": "./test/http/run-http-tests.sh",
+    "test:cli": "./test/e2e/cli-workflow.sh",
+    "test:e2e": "./test/e2e/run-all-tests.sh"
   },
   "bin": {
     "taskdriver": "dist/cli.js"

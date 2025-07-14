@@ -97,12 +97,14 @@ export class TaskService {
     }
 
     // Validate all task types exist and belong to this project
-    const taskTypeIds = [...new Set(tasks.map(t => t.typeId))];
+    const taskTypeIds = [...new Set(tasks.map(t => t.type))];
     const taskTypes = new Map<string, any>();
+    const typeIdToResolved = new Map<string, string>(); // Map original typeId to resolved ID
     
     for (const typeId of taskTypeIds) {
       const taskType = await this.taskTypeService.validateTaskType(typeId, projectId);
-      taskTypes.set(typeId, taskType);
+      taskTypes.set(taskType.id, taskType); // Use resolved ID as key
+      typeIdToResolved.set(typeId, taskType.id); // Map original to resolved
     }
 
     // Process each task and validate template variables
@@ -116,13 +118,20 @@ export class TaskService {
           throw new Error(`Task ${i}: Task is undefined`);
         }
         
-        const taskType = taskTypes.get(task.typeId);
+        // Resolve the task type ID (in case a name was provided)
+        const originalTypeId = task.type;
+        const resolvedTypeId = typeIdToResolved.get(originalTypeId);
+        if (!resolvedTypeId) {
+          throw new Error(`Task ${i}: Task type ${originalTypeId} not found`);
+        }
+        
+        const taskType = taskTypes.get(resolvedTypeId);
         if (!taskType) {
-          throw new Error(`Task ${i}: Task type ${task.typeId} not found`);
+          throw new Error(`Task ${i}: Task type ${originalTypeId} not found`);
         }
         
         if (taskType.template) {
-          const variables = task.variables || {};
+          const variables = task.vars || {};
           const validation = validateTemplateVariables(taskType.template, variables);
           if (!validation.valid) {
             throw new Error(
@@ -133,22 +142,23 @@ export class TaskService {
           // For template-based tasks, store NO instructions - only variables
           const createdTask = await this.storage.createTask({
             projectId,
-            typeId: task.typeId,
+            typeId: resolvedTypeId, // Use resolved type ID
             instructions: undefined, // No instructions stored for template tasks
-            variables: task.variables,
-            id: (task as any).id,
-            description: (task as any).description,
+            variables: variables,
+            id: task.id,
+            description: task.description,
           });
           createdTasks.push(createdTask);
         } else {
           // For non-template tasks, store the provided instructions
+          const variables = task.vars || {};
           const createdTask = await this.storage.createTask({
             projectId,
-            typeId: task.typeId,
+            typeId: resolvedTypeId, // Use resolved type ID
             instructions: task.instructions,
-            variables: task.variables,
-            id: (task as any).id,
-            description: (task as any).description,
+            variables: variables,
+            id: task.id,
+            description: task.description,
           });
           createdTasks.push(createdTask);
         }
