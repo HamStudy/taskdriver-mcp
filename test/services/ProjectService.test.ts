@@ -68,18 +68,17 @@ describe('ProjectService', () => {
         .rejects.toThrow('Validation failed');
     });
 
-    it('should allow duplicate project names', async () => {
+    it('should throw error for duplicate project names', async () => {
       const input = {
         name: 'duplicate-project',
         description: 'First project'
       };
 
       const project1 = await projectService.createProject(input);
-      const project2 = await projectService.createProject(input);
-
       expect(project1.name).toBe('duplicate-project');
-      expect(project2.name).toBe('duplicate-project');
-      expect(project1.id).not.toBe(project2.id); // Should have different IDs
+
+      await expect(projectService.createProject(input))
+        .rejects.toThrow('Project with name \'duplicate-project\' already exists');
     });
   });
 
@@ -146,6 +145,22 @@ describe('ProjectService', () => {
     it('should throw error for non-existent project', async () => {
       await expect(projectService.updateProject('non-existent-id', { description: 'test' }))
         .rejects.toThrow('Project non-existent-id not found');
+    });
+
+    it('should throw error for duplicate name during update', async () => {
+      // Create two projects
+      const project1 = await projectService.createProject({
+        name: 'project-1',
+        description: 'First project'
+      });
+      const project2 = await projectService.createProject({
+        name: 'project-2',
+        description: 'Second project'
+      });
+
+      // Try to rename project2 to have same name as project1
+      await expect(projectService.updateProject(project2.id, { name: 'project-1' }))
+        .rejects.toThrow('Project with name \'project-1\' already exists');
     });
   });
 

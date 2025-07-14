@@ -321,7 +321,6 @@ export class ToolHandlers {
               instructions: task.instructions,
               status: task.status,
               createdAt: task.createdAt,
-              batchId: task.batchId,
               variables: task.variables
             }
           }, null, 2)
@@ -351,7 +350,6 @@ export class ToolHandlers {
               createdAt: t.createdAt,
               assignedAt: t.assignedAt,
               completedAt: t.completedAt,
-              batchId: t.batchId,
               retryCount: t.retryCount,
               maxRetries: t.maxRetries
             }))
@@ -396,7 +394,6 @@ export class ToolHandlers {
               createdAt: task.createdAt,
               assignedAt: task.assignedAt,
               completedAt: task.completedAt,
-              batchId: task.batchId,
               variables: task.variables,
               retryCount: task.retryCount,
               maxRetries: task.maxRetries,

@@ -208,20 +208,23 @@ describe('AgentService', () => {
       // Create task type and tasks
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'test-task-type'
+        name: 'test-task-type',
+        template: 'Test task for {{resource}}'
       });
       taskTypeId = taskType.id;
 
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'First task'
+        instructions: 'First task',
+        variables: { resource: 'resource-1' }
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Second task'
+        instructions: 'Second task',
+        variables: { resource: 'resource-2' }
       });
     });
 
@@ -290,13 +293,15 @@ describe('AgentService', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'complete-task-type'
+        name: 'complete-task-type',
+        template: 'Complete task for {{resource}}'
       });
 
       const task = await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Task to complete'
+        instructions: 'Task to complete',
+        variables: { resource: 'test-resource' }
       });
       taskId = task.id;
 
@@ -361,13 +366,15 @@ describe('AgentService', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'fail-task-type'
+        name: 'fail-task-type',
+        template: 'Fail task for {{resource}}'
       });
 
       const task = await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Task to fail'
+        instructions: 'Task to fail',
+        variables: { resource: 'test-resource' }
       });
       taskId = task.id;
 
@@ -559,13 +566,15 @@ describe('AgentService', () => {
       // Make agent work on a task
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'disable-task-type'
+        name: 'disable-task-type',
+        template: 'Disable task for {{resource}}'
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Disable test task'
+        instructions: 'Disable test task',
+        variables: { resource: 'test-resource' }
       });
 
       await agentService.getNextTask('disable-agent', projectId);
@@ -602,13 +611,15 @@ describe('AgentService', () => {
       // Make agent work on a task
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'delete-task-type'
+        name: 'delete-task-type',
+        template: 'Delete task for {{resource}}'
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Delete test task'
+        instructions: 'Delete test task',
+        variables: { resource: 'test-resource' }
       });
 
       await agentService.getNextTask('delete-agent', projectId);

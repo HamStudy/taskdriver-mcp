@@ -3,7 +3,6 @@ export * from './Project.js';
 export * from './TaskType.js';
 export * from './Task.js';
 export * from './Agent.js';
-export * from './Batch.js';
 export * from './Session.js';
 
 // Additional enums

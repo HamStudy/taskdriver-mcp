@@ -24,6 +24,10 @@ export const createProjectTool: Tool = {
         type: 'string',
         description: 'Project description'
       },
+      instructions: {
+        type: 'string',
+        description: 'Project instructions for agents - important guidance that should be read before starting any task'
+      },
       config: {
         type: 'object',
         description: 'Optional project configuration',
@@ -81,7 +85,7 @@ export const listProjectsTool: Tool = {
 
 export const getProjectTool: Tool = {
   name: 'get_project',
-  description: 'Get detailed information about a specific project',
+  description: 'Get detailed information about a specific project. This includes project instructions that agents should read before starting any task.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -107,6 +111,10 @@ export const updateProjectTool: Tool = {
       description: {
         type: 'string',
         description: 'New project description'
+      },
+      instructions: {
+        type: 'string',
+        description: 'New project instructions for agents - important guidance that should be read before starting any task'
       },
       status: {
         type: 'string',
@@ -232,12 +240,58 @@ export const createTaskTool: Tool = {
           type: 'string'
         }
       },
-      batchId: {
-        type: 'string',
-        description: 'Optional batch ID for grouping related tasks'
-      }
     },
     required: ['projectId', 'typeId', 'instructions']
+  }
+};
+
+export const createTasksBulkTool: Tool = {
+  name: 'create_tasks_bulk',
+  description: 'Create multiple tasks at once (no batch tracking)',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectId: {
+        type: 'string',
+        description: 'Project ID (UUID)'
+      },
+      tasks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            typeId: {
+              type: 'string',
+              description: 'Task type ID (UUID)'
+            },
+            id: {
+              type: 'string',
+              description: 'Optional custom task ID'
+            },
+            description: {
+              type: 'string',
+              description: 'Human-readable task description'
+            },
+            instructions: {
+              type: 'string',
+              description: 'Task instructions (required for non-template task types)'
+            },
+            variables: {
+              type: 'object',
+              additionalProperties: {
+                type: 'string'
+              },
+              description: 'Template variables (for template-based task types)'
+            }
+          },
+          required: ['typeId', 'instructions']
+        },
+        description: 'Array of tasks to create',
+        minItems: 1,
+        maxItems: 1000
+      }
+    },
+    required: ['projectId', 'tasks']
   }
 };
 
@@ -259,10 +313,6 @@ export const listTasksTool: Tool = {
       assignedTo: {
         type: 'string',
         description: 'Filter by assigned agent name'
-      },
-      batchId: {
-        type: 'string',
-        description: 'Filter by batch ID'
       },
       typeId: {
         type: 'string',
@@ -352,7 +402,7 @@ export const listAgentsTool: Tool = {
  */
 export const assignTaskTool: Tool = {
   name: 'assign_task',
-  description: 'Assign a queued task to an agent for execution',
+  description: 'Assign a queued task to an agent for execution. Before starting any task, agents should first get project instructions using get_project.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -378,7 +428,7 @@ export const assignTaskTool: Tool = {
 
 export const completeTaskTool: Tool = {
   name: 'complete_task',
-  description: 'Mark a task as completed with results',
+  description: 'Mark a task as completed with results. Before starting any task, agents should first get project instructions using get_project.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -406,7 +456,7 @@ export const completeTaskTool: Tool = {
 
 export const failTaskTool: Tool = {
   name: 'fail_task',
-  description: 'Mark a task as failed with error information',
+  description: 'Mark a task as failed with error information. Before starting any task, agents should first get project instructions using get_project.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -527,6 +577,7 @@ export const allTools: Tool[] = [
   
   // Task Management
   createTaskTool,
+  createTasksBulkTool,
   listTasksTool,
   getTaskTool,
   

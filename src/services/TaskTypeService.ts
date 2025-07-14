@@ -4,7 +4,7 @@ import {
   TaskTypeUpdateInput 
 } from '../types/index.js';
 import { StorageProvider } from '../storage/index.js';
-import { validate, createTaskTypeSchema } from '../utils/validation.js';
+import { validate, createTaskTypeSchema, extractVariablesFromTemplate, validateTemplateVariables } from '../utils/validation.js';
 import { ProjectService } from './ProjectService.js';
 
 /**
@@ -25,9 +25,22 @@ export class TaskTypeService {
     // Validate project exists and is active
     const project = await this.projectService.validateProjectAccess(validatedInput.projectId);
 
+    // Auto-detect variables from template if not provided
+    let variables = validatedInput.variables;
+    if (!variables) {
+      variables = extractVariablesFromTemplate(validatedInput.template);
+    } else {
+      // Validate that provided variables match template variables
+      const validation = validateTemplateVariables(validatedInput.template, variables);
+      if (!validation.isValid) {
+        throw new Error(`Template variables validation failed. Missing variables: ${validation.missingVariables.join(', ')}. Extra variables: ${validation.extraVariables.join(', ')}`);
+      }
+    }
+
     // Apply project defaults if not specified
     const taskTypeInput: TaskTypeCreateInput = {
       ...validatedInput,
+      variables,
       maxRetries: validatedInput.maxRetries ?? project.config.defaultMaxRetries,
       leaseDurationMinutes: validatedInput.leaseDurationMinutes ?? project.config.defaultLeaseDurationMinutes,
     };

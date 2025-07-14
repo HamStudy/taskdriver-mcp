@@ -2,6 +2,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  instructions?: string;
   status: 'active' | 'closed';
   createdAt: Date;
   updatedAt: Date;
@@ -22,11 +23,14 @@ export interface Project {
 export interface ProjectCreateInput {
   name: string;
   description: string;
+  instructions?: string;
   config?: Partial<Project['config']>;
 }
 
 export interface ProjectUpdateInput {
+  name?: string;
   description?: string;
+  instructions?: string;
   status?: Project['status'];
   config?: Partial<Project['config']>;
 }

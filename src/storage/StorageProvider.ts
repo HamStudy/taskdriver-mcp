@@ -14,8 +14,6 @@ import {
   Agent, 
   AgentCreateInput, 
   AgentUpdateInput,
-  BatchStatus,
-  BatchCreateResult,
   Session,
   SessionCreateInput,
   SessionUpdateInput
@@ -71,9 +69,6 @@ export interface StorageProvider {
   requeueTask(taskId: string): Promise<void>;
   extendLease(taskId: string, additionalMinutes: number): Promise<void>;
   
-  // Batch operations
-  createTasksBulk(projectId: string, tasks: TaskInput[]): Promise<BatchCreateResult>;
-  getBatchStatus(batchId: string): Promise<BatchStatus>;
   
   // Utility operations
   findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null>;
@@ -159,8 +154,6 @@ export abstract class BaseStorageProvider implements StorageProvider {
   abstract requeueTask(taskId: string): Promise<void>;
   abstract extendLease(taskId: string, additionalMinutes: number): Promise<void>;
 
-  abstract createTasksBulk(projectId: string, tasks: TaskInput[]): Promise<BatchCreateResult>;
-  abstract getBatchStatus(batchId: string): Promise<BatchStatus>;
 
   abstract findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null>;
   abstract getTaskHistory(taskId: string): Promise<Task[]>;

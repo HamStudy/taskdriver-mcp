@@ -209,7 +209,8 @@ describe('ToolHandlers', () => {
             name: 'create_task_type',
             arguments: {
               projectId,
-              name: 'test-task-type'
+              name: 'test-task-type',
+              template: 'Execute {{action}} task'
             }
           }
         });
@@ -257,8 +258,8 @@ describe('ToolHandlers', () => {
           name: 'create_task_type',
           arguments: {
             projectId,
-            name: 'test-task-type'
-            // No template - instructions will be used as-is
+            name: 'test-task-type',
+            template: 'Execute task: {{instructions}}'
           }
         }
       });
@@ -275,8 +276,10 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               typeId: taskTypeId,
-              instructions: 'Test task instructions'
-              // No variables since task type has no template
+              instructions: 'Test task instructions',
+              variables: {
+                instructions: 'Test task instructions'
+              }
             }
           }
         });
@@ -284,7 +287,7 @@ describe('ToolHandlers', () => {
         expect(result.isError).toBeFalsy();
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
-        expect(response.task.instructions).toBe('Test task instructions'); // No template
+        expect(response.task.instructions).toBe('Execute task: Test task instructions'); // Template applied
         expect(response.task.status).toBe('queued');
       });
     });
@@ -298,7 +301,10 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               typeId: taskTypeId,
-              instructions: 'Test task instructions'
+              instructions: 'Test task instructions',
+              variables: {
+                instructions: 'Test task instructions'
+              }
             }
           }
         });
@@ -319,7 +325,7 @@ describe('ToolHandlers', () => {
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
         expect(response.tasks).toHaveLength(1);
-        expect(response.tasks[0].instructions).toBe('Test task instructions');
+        expect(response.tasks[0].instructions).toBe('Execute task: Test task instructions');
       });
     });
 
@@ -332,7 +338,10 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               typeId: taskTypeId,
-              instructions: 'Test task instructions'
+              instructions: 'Test task instructions',
+              variables: {
+                instructions: 'Test task instructions'
+              }
             }
           }
         });
@@ -354,7 +363,7 @@ describe('ToolHandlers', () => {
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
         expect(response.task.id).toBe(taskId);
-        expect(response.task.instructions).toBe('Test task instructions');
+        expect(response.task.instructions).toBe('Execute task: Test task instructions');
       });
 
       it('should handle non-existent task', async () => {
@@ -492,7 +501,8 @@ describe('ToolHandlers', () => {
           name: 'create_task_type',
           arguments: {
             projectId,
-            name: 'test-task-type'
+            name: 'test-task-type',
+            template: 'Execute task: {{instructions}}'
           }
         }
       });
@@ -507,7 +517,10 @@ describe('ToolHandlers', () => {
           arguments: {
             projectId,
             typeId: taskTypeId,
-            instructions: 'Test task instructions'
+            instructions: 'Test task instructions',
+            variables: {
+              instructions: 'Test task instructions'
+            }
           }
         }
       });
@@ -728,7 +741,8 @@ describe('ToolHandlers', () => {
             name: 'create_task_type',
             arguments: {
               projectId,
-              name: 'lease-test-task-type'
+              name: 'lease-test-task-type',
+              template: 'Execute lease test: {{instructions}}'
             }
           }
         });
@@ -742,7 +756,10 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               typeId: leaseTaskTypeId,
-              instructions: 'Test task for lease management'
+              instructions: 'Test task for lease management',
+              variables: {
+                instructions: 'Test task for lease management'
+              }
             }
           }
         });

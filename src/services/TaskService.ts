@@ -4,9 +4,7 @@ import {
   TaskCreateInput, 
   TaskUpdateInput, 
   TaskFilters,
-  TaskInput,
-  BatchStatus,
-  BatchCreateResult
+  TaskInput
 } from '../types/index.js';
 import { StorageProvider } from '../storage/index.js';
 import { 
@@ -49,8 +47,7 @@ export class TaskService {
       validatedInput.projectId
     );
 
-    // Process template variables if template is defined
-    let finalInstructions = validatedInput.instructions;
+    // Validate template variables if template is defined
     if (taskType.template) {
       const variables = validatedInput.variables || {};
       
@@ -62,22 +59,32 @@ export class TaskService {
         );
       }
 
-      // Replace template variables in the template, not the provided instructions
-      finalInstructions = replaceTemplateVariables(taskType.template, variables);
+      // For template-based tasks, store NO instructions - only variables
+      const taskInput: TaskCreateInput = {
+        ...validatedInput,
+        instructions: undefined, // No instructions stored for template tasks
+      };
+
+      return this.storage.createTask(taskInput);
+    } else {
+      // For non-template tasks, store the provided instructions
+      const taskInput: TaskCreateInput = {
+        ...validatedInput,
+        instructions: validatedInput.instructions,
+      };
+
+      return this.storage.createTask(taskInput);
     }
-
-    const taskInput: TaskCreateInput = {
-      ...validatedInput,
-      instructions: finalInstructions,
-    };
-
-    return this.storage.createTask(taskInput);
   }
 
   /**
-   * Create multiple tasks in bulk
+   * Create multiple tasks in bulk (simplified - no batch tracking)
    */
-  async createTasksBulk(projectId: string, tasks: TaskInput[]): Promise<BatchCreateResult> {
+  async createTasksBulk(projectId: string, tasks: TaskInput[]): Promise<{
+    tasksCreated: number;
+    errors: string[];
+    createdTasks: Task[];
+  }> {
     // Validate project exists and is active
     await this.projectService.validateProjectAccess(projectId);
 
@@ -86,7 +93,7 @@ export class TaskService {
     }
 
     if (tasks.length > 1000) {
-      throw new Error('Cannot create bulk tasks: maximum 1000 tasks per batch');
+      throw new Error('Cannot create bulk tasks: maximum 1000 tasks per request');
     }
 
     // Validate all task types exist and belong to this project
@@ -99,7 +106,7 @@ export class TaskService {
     }
 
     // Process each task and validate template variables
-    const processedTasks: TaskCreateInput[] = [];
+    const createdTasks: Task[] = [];
     const errors: string[] = [];
 
     for (let i = 0; i < tasks.length; i++) {
@@ -114,7 +121,6 @@ export class TaskService {
           throw new Error(`Task ${i}: Task type ${task.typeId} not found`);
         }
         
-        let finalInstructions = task.instructions;
         if (taskType.template) {
           const variables = task.variables || {};
           const validation = validateTemplateVariables(taskType.template, variables);
@@ -123,25 +129,39 @@ export class TaskService {
               `Task ${i}: Missing required template variables: ${validation.missing.join(', ')}`
             );
           }
-          finalInstructions = replaceTemplateVariables(taskType.template, variables);
+          
+          // For template-based tasks, store NO instructions - only variables
+          const createdTask = await this.storage.createTask({
+            projectId,
+            typeId: task.typeId,
+            instructions: undefined, // No instructions stored for template tasks
+            variables: task.variables,
+            id: (task as any).id,
+            description: (task as any).description,
+          });
+          createdTasks.push(createdTask);
+        } else {
+          // For non-template tasks, store the provided instructions
+          const createdTask = await this.storage.createTask({
+            projectId,
+            typeId: task.typeId,
+            instructions: task.instructions,
+            variables: task.variables,
+            id: (task as any).id,
+            description: (task as any).description,
+          });
+          createdTasks.push(createdTask);
         }
-
-        processedTasks.push({
-          projectId,
-          typeId: task.typeId,
-          instructions: finalInstructions,
-          variables: task.variables,
-        });
       } catch (error: any) {
         errors.push(`Task ${i}: ${error.message}`);
       }
     }
 
-    if (errors.length > 0) {
-      throw new Error(`Bulk task creation failed:\n${errors.join('\n')}`);
-    }
-
-    return this.storage.createTasksBulk(projectId, processedTasks);
+    return {
+      tasksCreated: createdTasks.length,
+      errors,
+      createdTasks
+    };
   }
 
   /**
@@ -149,6 +169,35 @@ export class TaskService {
    */
   async getTask(taskId: string): Promise<Task | null> {
     return this.storage.getTask(taskId);
+  }
+
+  /**
+   * Get the actual instructions for a task (interpolated from template if needed)
+   */
+  async getTaskInstructions(taskId: string): Promise<string> {
+    const task = await this.storage.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    // If task has stored instructions, return them
+    if (task.instructions) {
+      return task.instructions;
+    }
+
+    // Otherwise, look up task type and interpolate template
+    const taskType = await this.taskTypeService.getTaskType(task.typeId);
+    if (!taskType) {
+      throw new Error(`Task type ${task.typeId} not found`);
+    }
+
+    if (!taskType.template) {
+      throw new Error(`Task ${taskId} has no instructions and task type ${task.typeId} has no template`);
+    }
+
+    // Interpolate template with task variables
+    const variables = task.variables || {};
+    return replaceTemplateVariables(taskType.template, variables);
   }
 
   /**
@@ -201,12 +250,6 @@ export class TaskService {
     return this.storage.getTaskHistory(taskId);
   }
 
-  /**
-   * Get batch status by batch ID
-   */
-  async getBatchStatus(batchId: string): Promise<BatchStatus> {
-    return this.storage.getBatchStatus(batchId);
-  }
 
   /**
    * Get the next available task for an agent (used by AgentService)

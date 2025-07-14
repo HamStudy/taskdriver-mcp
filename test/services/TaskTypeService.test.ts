@@ -39,7 +39,8 @@ describe('TaskTypeService', () => {
     it('should create a task type with minimal input', async () => {
       const input = {
         projectId,
-        name: 'simple-task'
+        name: 'simple-task',
+        template: 'Simple task with no variables'
       };
 
       const taskType = await taskTypeService.createTaskType(input);
@@ -47,8 +48,8 @@ describe('TaskTypeService', () => {
       expect(taskType.id).toBeDefined();
       expect(taskType.name).toBe('simple-task');
       expect(taskType.projectId).toBe(projectId);
-      expect(taskType.template).toBeUndefined();
-      expect(taskType.variables).toBeUndefined();
+      expect(taskType.template).toBe('Simple task with no variables');
+      expect(taskType.variables).toEqual([]); // Auto-detected from template
       expect(taskType.duplicateHandling).toBe('allow');
       expect(taskType.maxRetries).toBe(3); // Default from project config
       expect(taskType.leaseDurationMinutes).toBe(10); // Default from project config
@@ -70,10 +71,25 @@ describe('TaskTypeService', () => {
       expect(taskType.variables).toEqual(['item', 'action']);
     });
 
+    it('should auto-detect variables from template', async () => {
+      const input = {
+        projectId,
+        name: 'auto-detect-task',
+        template: 'Process {{item}} with {{action}} and {{mode}}'
+        // No variables provided - should be auto-detected
+      };
+
+      const taskType = await taskTypeService.createTaskType(input);
+
+      expect(taskType.template).toBe('Process {{item}} with {{action}} and {{mode}}');
+      expect(taskType.variables).toEqual(['action', 'item', 'mode']); // Variables are sorted alphabetically
+    });
+
     it('should create task type with custom configuration', async () => {
       const input = {
         projectId,
         name: 'custom-task',
+        template: 'Custom task for {{category}}',
         duplicateHandling: 'fail' as const,
         maxRetries: 5,
         leaseDurationMinutes: 30
@@ -81,6 +97,8 @@ describe('TaskTypeService', () => {
 
       const taskType = await taskTypeService.createTaskType(input);
 
+      expect(taskType.template).toBe('Custom task for {{category}}');
+      expect(taskType.variables).toEqual(['category']); // Auto-detected from template
       expect(taskType.duplicateHandling).toBe('fail');
       expect(taskType.maxRetries).toBe(5);
       expect(taskType.leaseDurationMinutes).toBe(30);
@@ -89,7 +107,8 @@ describe('TaskTypeService', () => {
     it('should throw validation error for invalid input', async () => {
       const input = {
         projectId,
-        name: '' // Invalid empty name
+        name: '', // Invalid empty name
+        template: 'Test template'
       };
 
       await expect(taskTypeService.createTaskType(input))
@@ -99,7 +118,8 @@ describe('TaskTypeService', () => {
     it('should throw validation error for invalid project ID format', async () => {
       const input = {
         projectId: 'non-existent-project',
-        name: 'test-task'
+        name: 'test-task',
+        template: 'Test template'
       };
 
       await expect(taskTypeService.createTaskType(input))
@@ -109,7 +129,8 @@ describe('TaskTypeService', () => {
     it('should throw error for duplicate task type name in project', async () => {
       const input = {
         projectId,
-        name: 'duplicate-task'
+        name: 'duplicate-task',
+        template: 'Duplicate task for {{id}}'
       };
 
       await taskTypeService.createTaskType(input);
@@ -126,12 +147,14 @@ describe('TaskTypeService', () => {
 
       const input = {
         projectId,
-        name: 'shared-name'
+        name: 'shared-name',
+        template: 'Shared task for {{user}}'
       };
 
       const input2 = {
         projectId: secondProject.id,
-        name: 'shared-name'
+        name: 'shared-name',
+        template: 'Shared task for {{user}}'
       };
 
       const taskType1 = await taskTypeService.createTaskType(input);
@@ -148,7 +171,8 @@ describe('TaskTypeService', () => {
     it('should retrieve existing task type', async () => {
       const created = await taskTypeService.createTaskType({
         projectId,
-        name: 'retrieve-task'
+        name: 'retrieve-task',
+        template: 'Retrieve task for {{resource}}'
       });
 
       const retrieved = await taskTypeService.getTaskType(created.id);
@@ -156,6 +180,7 @@ describe('TaskTypeService', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.id).toBe(created.id);
       expect(retrieved!.name).toBe('retrieve-task');
+      expect(retrieved!.template).toBe('Retrieve task for {{resource}}');
     });
 
     it('should return null for non-existent task type', async () => {
@@ -208,7 +233,8 @@ describe('TaskTypeService', () => {
     it('should throw error for duplicate name within project', async () => {
       await taskTypeService.createTaskType({
         projectId,
-        name: 'existing-name'
+        name: 'existing-name',
+        template: 'Existing task for {{type}}'
       });
 
       await expect(taskTypeService.updateTaskType(taskTypeId, { name: 'existing-name' }))
@@ -221,12 +247,14 @@ describe('TaskTypeService', () => {
       // Create test task types
       await taskTypeService.createTaskType({
         projectId,
-        name: 'task-type-1'
+        name: 'task-type-1',
+        template: 'Task type 1 for {{context}}'
       });
 
       await taskTypeService.createTaskType({
         projectId,
-        name: 'task-type-2'
+        name: 'task-type-2',
+        template: 'Task type 2 for {{context}}'
       });
 
       // Create task type in different project
@@ -237,7 +265,8 @@ describe('TaskTypeService', () => {
 
       await taskTypeService.createTaskType({
         projectId: otherProject.id,
-        name: 'other-task-type'
+        name: 'other-task-type',
+        template: 'Other task type for {{context}}'
       });
     });
 
@@ -270,7 +299,8 @@ describe('TaskTypeService', () => {
     it('should delete existing task type', async () => {
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'delete-task'
+        name: 'delete-task',
+        template: 'Delete task for {{resource}}'
       });
 
       await taskTypeService.deleteTaskType(taskType.id);

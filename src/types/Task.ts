@@ -2,14 +2,14 @@ export interface Task {
   id: string;
   projectId: string;
   typeId: string;
-  instructions: string;  // Final instructions (template filled)
+  description: string;  // Human-readable description
+  instructions?: string;  // Final instructions (only for non-template tasks)
   variables?: Record<string, string>;  // Variable values
   status: 'queued' | 'running' | 'completed' | 'failed';
   assignedTo?: string;  // Agent name
   leaseExpiresAt?: Date;  // When current lease expires (for running tasks)
   retryCount: number;  // Number of times this task has been retried
   maxRetries: number;  // Maximum retries allowed (from task type or project default)
-  batchId?: string;  // Optional batch identifier for bulk operations
   createdAt: Date;
   updatedAt?: Date;
   assignedAt?: Date;
@@ -34,9 +34,10 @@ export interface TaskAttempt {
 export interface TaskCreateInput {
   projectId: string;
   typeId: string;
-  instructions: string;
+  id?: string;  // Optional custom task ID
+  description?: string;  // Optional human-readable description
+  instructions?: string;  // Only for non-template tasks
   variables?: Record<string, string>;
-  batchId?: string;
 }
 
 export interface TaskUpdateInput {
@@ -49,7 +50,6 @@ export interface TaskUpdateInput {
 export interface TaskFilters {
   status?: Task['status'];
   assignedTo?: string;
-  batchId?: string;
   typeId?: string;
   limit?: number;
   offset?: number;

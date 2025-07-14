@@ -199,6 +199,7 @@ describe('Storage Provider Integration', () => {
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
         name: 'short-lease-task',
+        template: 'Execute short lease task: {{instructions}}',
         leaseDurationMinutes: 1 // 1 minute (minimum allowed)
       });
 
@@ -211,7 +212,10 @@ describe('Storage Provider Integration', () => {
       const task = await taskService.createTask({
         projectId: project.id,
         typeId: taskType.id,
-        instructions: 'Task with short lease'
+        instructions: 'Task with short lease',
+        variables: {
+          instructions: 'Task with short lease'
+        }
       });
 
       // Assign task
@@ -251,6 +255,7 @@ describe('Storage Provider Integration', () => {
       const ignoreTaskType = await taskTypeService.createTaskType({
         projectId: project.id,
         name: 'ignore-duplicate-task',
+        template: 'Execute ignore duplicate task: {{instructions}}',
         duplicateHandling: 'ignore'
       });
 
@@ -258,6 +263,7 @@ describe('Storage Provider Integration', () => {
       const failTaskType = await taskTypeService.createTaskType({
         projectId: project.id,
         name: 'fail-duplicate-task',
+        template: 'Execute fail duplicate task: {{instructions}}',
         duplicateHandling: 'fail'
       });
 
@@ -266,14 +272,14 @@ describe('Storage Provider Integration', () => {
         projectId: project.id,
         typeId: ignoreTaskType.id,
         instructions: 'Duplicate task',
-        variables: { key: 'value' }
+        variables: { instructions: 'Duplicate task' }
       });
 
       const task2 = await taskService.createTask({
         projectId: project.id,
         typeId: ignoreTaskType.id,
         instructions: 'Duplicate task',
-        variables: { key: 'value' }
+        variables: { instructions: 'Duplicate task' }
       });
 
       expect(task1.id).toBe(task2.id); // Should return same task
@@ -283,14 +289,14 @@ describe('Storage Provider Integration', () => {
         projectId: project.id,
         typeId: failTaskType.id,
         instructions: 'Another duplicate task',
-        variables: { key: 'value' }
+        variables: { instructions: 'Another duplicate task' }
       });
 
       await expect(taskService.createTask({
         projectId: project.id,
         typeId: failTaskType.id,
         instructions: 'Another duplicate task',
-        variables: { key: 'value' }
+        variables: { instructions: 'Another duplicate task' }
       })).rejects.toThrow('Duplicate task found');
     });
 
@@ -302,7 +308,8 @@ describe('Storage Provider Integration', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
-        name: 'batch-task-type'
+        name: 'batch-task-type',
+        template: 'Execute batch task: {{instructions}}'
       });
 
       const agentReg = await agentService.registerAgent({
@@ -361,7 +368,8 @@ describe('Storage Provider Integration', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
-        name: 'consistency-task-type'
+        name: 'consistency-task-type',
+        template: 'Execute consistency task: {{instructions}}'
       });
 
       const agentReg = await agentService.registerAgent({
@@ -374,7 +382,10 @@ describe('Storage Provider Integration', () => {
       const task = await taskService.createTask({
         projectId: project.id,
         typeId: taskType.id,
-        instructions: 'Consistency test task'
+        instructions: 'Consistency test task',
+        variables: {
+          instructions: 'Consistency test task'
+        }
       });
 
       // Assign via AgentService
@@ -416,7 +427,8 @@ describe('Storage Provider Integration', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
-        name: 'concurrent-task-type'
+        name: 'concurrent-task-type',
+        template: 'Execute concurrent task: {{instructions}}'
       });
 
       // Register multiple agents
@@ -437,17 +449,20 @@ describe('Storage Provider Integration', () => {
         taskService.createTask({
           projectId: project.id,
           typeId: taskType.id,
-          instructions: 'Concurrent task 1'
+          instructions: 'Concurrent task 1',
+          variables: { instructions: 'Concurrent task 1' }
         }),
         taskService.createTask({
           projectId: project.id,
           typeId: taskType.id,
-          instructions: 'Concurrent task 2'
+          instructions: 'Concurrent task 2',
+          variables: { instructions: 'Concurrent task 2' }
         }),
         taskService.createTask({
           projectId: project.id,
           typeId: taskType.id,
-          instructions: 'Concurrent task 3'
+          instructions: 'Concurrent task 3',
+          variables: { instructions: 'Concurrent task 3' }
         })
       ]);
 
@@ -505,7 +520,8 @@ describe('Storage Provider Integration', () => {
       await expect(taskService.createTask({
         projectId: project.id,
         typeId: fakeTypeId,
-        instructions: 'This should fail'
+        instructions: 'This should fail',
+        variables: { instructions: 'This should fail' }
       })).rejects.toThrow(`Task type ${fakeTypeId} not found`);
 
       // Try to register agent with non-existent project (but valid UUID format)
@@ -552,14 +568,16 @@ describe('Storage Provider Integration', () => {
 
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
-        name: 'valid-task-type'
+        name: 'valid-task-type',
+        template: 'Execute valid task: {{instructions}}'
       });
 
       // Invalid task creation
       await expect(taskService.createTask({
         projectId: project.id,
         typeId: taskType.id,
-        instructions: '' // Invalid empty instructions
+        instructions: '', // Invalid empty instructions
+        variables: { instructions: '' }
       })).rejects.toThrow('Validation failed');
     });
   });

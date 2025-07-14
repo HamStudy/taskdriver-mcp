@@ -1,0 +1,70 @@
+{
+  "project": {
+    "id": "331bdad4-29e9-41fe-8d30-58d5e073eee9",
+    "name": "email-project",
+    "description": "Email processing project",
+    "instructions": "# Email Processing Project\n\nProcess email files by reading their contents and generating summaries.\n\n## Instructions for Agents\n\n1. Read the email file specified in the task variables\n2. Extract key information (sender, subject, date, body)\n3. Generate a concise summary\n4. Save the summary to the output directory",
+    "status": "active",
+    "createdAt": "2025-07-14T20:02:34.424Z",
+    "updatedAt": "2025-07-14T20:14:20.043Z",
+    "config": {
+      "defaultMaxRetries": 3,
+      "defaultLeaseDurationMinutes": 10,
+      "reaperIntervalMinutes": 1
+    },
+    "stats": {
+      "totalTasks": 1,
+      "completedTasks": 0,
+      "failedTasks": 0,
+      "queuedTasks": 1,
+      "runningTasks": 0
+    }
+  },
+  "taskTypes": [
+    {
+      "id": "14645257-a3cd-4400-9d7d-7f34faceb3b6",
+      "name": "email-processor",
+      "projectId": "331bdad4-29e9-41fe-8d30-58d5e073eee9",
+      "template": "Process the email file located at {{file}} and generate a summary.\n\n## Task Details\n- File to process: {{file}}\n- Extract sender, subject, date, and body\n- Generate a concise summary\n- Save summary to output directory with same filename but .txt extension",
+      "variables": [
+        "file"
+      ],
+      "duplicateHandling": "ignore",
+      "maxRetries": 3,
+      "leaseDurationMinutes": 10,
+      "createdAt": "2025-07-14T20:02:59.751Z",
+      "updatedAt": "2025-07-14T20:02:59.751Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-1",
+      "projectId": "331bdad4-29e9-41fe-8d30-58d5e073eee9",
+      "typeId": "14645257-a3cd-4400-9d7d-7f34faceb3b6",
+      "description": "Task of type email-processor",
+      "variables": {
+        "file": "test.md"
+      },
+      "status": "queued",
+      "retryCount": 0,
+      "maxRetries": 3,
+      "createdAt": "2025-07-14T20:03:07.272Z",
+      "attempts": []
+    },
+    {
+      "id": "task-2",
+      "projectId": "331bdad4-29e9-41fe-8d30-58d5e073eee9",
+      "typeId": "14645257-a3cd-4400-9d7d-7f34faceb3b6",
+      "description": "Task of type email-processor",
+      "variables": {
+        "file": "another-test.md"
+      },
+      "status": "queued",
+      "retryCount": 0,
+      "maxRetries": 3,
+      "createdAt": "2025-07-14T20:14:20.046Z",
+      "attempts": []
+    }
+  ],
+  "agents": []
+}

@@ -693,12 +693,14 @@ export class TaskDriverHttpServer {
 
   private async handleCreateTasksBulk(req: Request, res: Response): Promise<void> {
     try {
-      const { tasks } = req.body;
-      const tasksWithProject = tasks.map((task: any) => ({
-        ...task,
-        projectId: req.params.projectId
-      }));
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
+      const { tasks } = req.body;
+      
+      if (!Array.isArray(tasks)) {
+        this.sendError(res, 'Tasks must be an array');
+        return;
+      }
+      
       const result = await this.services!.task.createTasksBulk(projectId, tasks);
       this.sendSuccess(res, result, 201);
     } catch (error: any) {

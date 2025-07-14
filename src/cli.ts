@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 /**
  * TaskDriver CLI
@@ -8,6 +8,8 @@
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { loadConfig } from './config/index.js';
 import { createStorageProvider } from './storage/index.js';
 import { ProjectService } from './services/ProjectService.js';
@@ -16,6 +18,25 @@ import { TaskService } from './services/TaskService.js';
 import { AgentService } from './services/AgentService.js';
 import { LeaseService } from './services/LeaseService.js';
 import { TaskFilters } from './types/index.js';
+
+/**
+ * Reads content from a file path if the value starts with '@', otherwise returns the value as-is
+ * @param value - The input value, which can be a file path (prefixed with '@') or inline content
+ * @returns The content, either read from file or the original value
+ */
+function readContentFromFileOrValue(value: string): string {
+  if (value.startsWith('@')) {
+    const filePath = value.slice(1); // Remove the '@' prefix
+    try {
+      const absolutePath = resolve(filePath);
+      return readFileSync(absolutePath, 'utf-8').trim();
+    } catch (error: any) {
+      console.error(chalk.red(`❌ Failed to read file '${filePath}':`, error.message));
+      process.exit(1);
+    }
+  }
+  return value;
+}
 
 // Global services
 let services: {
@@ -74,6 +95,7 @@ function formatProject(project: any) {
   return `
 ${chalk.bold.blue(project.name)} (${project.id})
 ${chalk.gray('Description:')} ${project.description || 'No description'}
+${chalk.gray('Instructions:')} ${project.instructions || 'No instructions'}
 ${chalk.gray('Status:')} ${project.status === 'active' ? chalk.green(project.status) : chalk.yellow(project.status)}
 ${chalk.gray('Created:')} ${new Date(project.createdAt).toLocaleString()}
 
@@ -91,7 +113,7 @@ ${chalk.bold('Statistics:')}
 `;
 }
 
-function formatTask(task: any) {
+async function formatTask(task: any, services: any, options: { verbose?: boolean } = {}): Promise<string> {
   const statusColors: Record<string, any> = {
     queued: chalk.yellow,
     running: chalk.blue,
@@ -100,12 +122,26 @@ function formatTask(task: any) {
   };
   const statusColor = statusColors[task.status] || chalk.gray;
   
+  let instructionsLine = '';
+  if (options.verbose) {
+    // Get instructions dynamically (from template if needed)
+    let instructions = task.instructions || 'No instructions stored';
+    if (!task.instructions) {
+      try {
+        instructions = await services.task.getTaskInstructions(task.id);
+      } catch (error) {
+        instructions = `Error getting instructions: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      }
+    }
+    instructionsLine = `${chalk.gray('Instructions:')} ${instructions}\n`;
+  }
+  
   return `
 ${chalk.bold('Task:')} ${task.id}
+${chalk.gray('Description:')} ${task.description || 'No description'}
 ${chalk.gray('Type:')} ${task.typeId}
 ${chalk.gray('Status:')} ${statusColor(task.status)}
-${chalk.gray('Instructions:')} ${task.instructions}
-${chalk.gray('Created:')} ${new Date(task.createdAt).toLocaleString()}
+${instructionsLine}${chalk.gray('Created:')} ${new Date(task.createdAt).toLocaleString()}
 ${task.assignedTo ? chalk.gray('Assigned to:') + ' ' + task.assignedTo : ''}
 ${task.completedAt ? chalk.gray('Completed:') + ' ' + new Date(task.completedAt).toLocaleString() : ''}
 ${task.retryCount > 0 ? chalk.gray('Retry count:') + ' ' + task.retryCount : ''}
@@ -121,7 +157,6 @@ const cli = yargs(hideBin(process.argv))
   .help()
   .version()
   .alias('h', 'help')
-  .alias('v', 'version')
   
   // Project Management Commands
   .command('create-project <name> <description>', 'Create a new project', (yargs) => {
@@ -131,7 +166,7 @@ const cli = yargs(hideBin(process.argv))
         type: 'string'
       })
       .positional('description', {
-        describe: 'Project description',
+        describe: 'Project description (or @path/to/file.txt to read from file)',
         type: 'string'
       })
       .option('max-retries', {
@@ -145,14 +180,23 @@ const cli = yargs(hideBin(process.argv))
         type: 'number',
         describe: 'Default lease duration in minutes',
         default: 10
+      })
+      .option('instructions', {
+        alias: 'i',
+        type: 'string',
+        describe: 'Project instructions for agents (or @path/to/file.txt to read from file)'
       });
   }, async (argv) => {
     const services = await initializeServices();
     
     try {
+      const description = readContentFromFileOrValue(argv.description!);
+      const instructions = argv.instructions ? readContentFromFileOrValue(argv.instructions) : undefined;
+      
       const project = await services.project.createProject({
         name: argv.name!,
-        description: argv.description!,
+        description,
+        instructions,
         config: {
           defaultMaxRetries: argv['max-retries'],
           defaultLeaseDurationMinutes: argv['lease-duration'],
@@ -231,6 +275,106 @@ const cli = yargs(hideBin(process.argv))
     }
   })
 
+  .command('update-project <project>', 'Update an existing project', (yargs) => {
+    return yargs
+      .positional('project', {
+        describe: 'Project name or ID',
+        type: 'string'
+      })
+      .option('name', {
+        alias: 'n',
+        type: 'string',
+        describe: 'New project name'
+      })
+      .option('description', {
+        alias: 'd',
+        type: 'string',
+        describe: 'New project description (or @path/to/file.txt to read from file)'
+      })
+      .option('instructions', {
+        alias: 'i',
+        type: 'string',
+        describe: 'New project instructions (or @path/to/file.txt to read from file)'
+      })
+      .option('status', {
+        alias: 's',
+        type: 'string',
+        choices: ['active', 'closed'],
+        describe: 'Project status'
+      })
+      .option('max-retries', {
+        alias: 'r',
+        type: 'number',
+        describe: 'Default maximum retry attempts'
+      })
+      .option('lease-duration', {
+        alias: 'l',
+        type: 'number',
+        describe: 'Default lease duration in minutes'
+      })
+      .option('reaper-interval', {
+        type: 'number',
+        describe: 'Reaper interval in minutes'
+      });
+  }, async (argv) => {
+    const services = await initializeServices();
+    
+    try {
+      // Find project
+      const projects = await services.project.listProjects(true);
+      const project = projects.find(p => p.name === argv.project! || p.id === argv.project!);
+      
+      if (!project) {
+        console.error(chalk.red(`❌ Project '${argv.project}' not found`));
+        process.exit(1);
+      }
+      
+      // Prepare update input
+      const updateInput: any = {};
+      
+      if (argv.name) {
+        updateInput.name = argv.name;
+      }
+      
+      if (argv.description) {
+        updateInput.description = await readContentFromFileOrValue(argv.description);
+      }
+      
+      if (argv.instructions) {
+        updateInput.instructions = await readContentFromFileOrValue(argv.instructions);
+      }
+      
+      if (argv.status) {
+        updateInput.status = argv.status;
+      }
+      
+      // Handle config updates
+      if (argv['max-retries'] !== undefined || argv['lease-duration'] !== undefined || argv['reaper-interval'] !== undefined) {
+        updateInput.config = {
+          ...project.config,
+          ...(argv['max-retries'] !== undefined && { defaultMaxRetries: argv['max-retries'] }),
+          ...(argv['lease-duration'] !== undefined && { defaultLeaseDurationMinutes: argv['lease-duration'] }),
+          ...(argv['reaper-interval'] !== undefined && { reaperIntervalMinutes: argv['reaper-interval'] })
+        };
+      }
+      
+      // Check if any updates were provided
+      if (Object.keys(updateInput).length === 0) {
+        console.error(chalk.red('❌ No updates provided. Use --help to see available options.'));
+        process.exit(1);
+      }
+      
+      const updatedProject = await services.project.updateProject(project.id, updateInput);
+      
+      console.log(chalk.green('✅ Project updated successfully'));
+      console.log(formatProject(updatedProject));
+      
+    } catch (error: any) {
+      console.error(chalk.red('❌ Failed to update project:'), error.message);
+      process.exit(1);
+    }
+  })
+
   // Task Type Management Commands
   .command('create-task-type <project> <name>', 'Create a new task type', (yargs) => {
     return yargs
@@ -245,11 +389,11 @@ const cli = yargs(hideBin(process.argv))
       .option('template', {
         alias: 't',
         type: 'string',
-        describe: 'Task template with variables like {{variable}}',
+        describe: 'Task template with variables like {{variable}} (or @path/to/file.txt to read from file)',
         default: ''
       })
       .option('variables', {
-        alias: 'vars',
+        alias: ['vars', 'v'],
         type: 'array',
         describe: 'Template variables (space-separated)',
         default: []
@@ -284,11 +428,13 @@ const cli = yargs(hideBin(process.argv))
         process.exit(1);
       }
       
+      const template = readContentFromFileOrValue(argv.template!);
+      
       const taskType = await services.taskType.createTaskType({
         projectId: project.id,
         name: argv.name!,
-        template: argv.template,
-        variables: argv.variables as string[],
+        template,
+        ...(argv.variables && argv.variables.length > 0 && { variables: argv.variables as string[] }),
         duplicateHandling: argv['duplicate-handling'] as any,
         maxRetries: argv['max-retries'],
         leaseDurationMinutes: argv['lease-duration']
@@ -399,30 +545,140 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
     }
   })
 
+  .command('update-task-type <type-id>', 'Update an existing task type', (yargs) => {
+    return yargs
+      .positional('type-id', {
+        describe: 'Task type ID',
+        type: 'string'
+      })
+      .option('name', {
+        alias: 'n',
+        type: 'string',
+        describe: 'New task type name'
+      })
+      .option('template', {
+        alias: 't',
+        type: 'string',
+        describe: 'New task template with variables like {{variable}} (or @path/to/file.txt to read from file)'
+      })
+      .option('variables', {
+        alias: ['vars', 'v'],
+        type: 'array',
+        describe: 'Template variables (space-separated)'
+      })
+      .option('duplicate-handling', {
+        alias: 'd',
+        type: 'string',
+        choices: ['allow', 'ignore', 'fail'],
+        describe: 'How to handle duplicate tasks'
+      })
+      .option('max-retries', {
+        alias: 'r',
+        type: 'number',
+        describe: 'Maximum retry attempts'
+      })
+      .option('lease-duration', {
+        alias: 'l',
+        type: 'number',
+        describe: 'Lease duration in minutes'
+      });
+  }, async (argv) => {
+    const services = await initializeServices();
+    
+    try {
+      // Get existing task type
+      const taskType = await services.taskType.getTaskType(argv['type-id']!);
+      
+      if (!taskType) {
+        console.error(chalk.red(`❌ Task type '${argv['type-id']}' not found`));
+        process.exit(1);
+      }
+      
+      // Prepare update input
+      const updateInput: any = {};
+      
+      if (argv.name) {
+        updateInput.name = argv.name;
+      }
+      
+      if (argv.template) {
+        updateInput.template = await readContentFromFileOrValue(argv.template);
+      }
+      
+      if (argv.variables && argv.variables.length > 0) {
+        updateInput.variables = argv.variables as string[];
+      }
+      
+      if (argv['duplicate-handling']) {
+        updateInput.duplicateHandling = argv['duplicate-handling'];
+      }
+      
+      if (argv['max-retries'] !== undefined) {
+        updateInput.maxRetries = argv['max-retries'];
+      }
+      
+      if (argv['lease-duration'] !== undefined) {
+        updateInput.leaseDurationMinutes = argv['lease-duration'];
+      }
+      
+      // Check if any updates were provided
+      if (Object.keys(updateInput).length === 0) {
+        console.error(chalk.red('❌ No updates provided. Use --help to see available options.'));
+        process.exit(1);
+      }
+      
+      const updatedTaskType = await services.taskType.updateTaskType(argv['type-id']!, updateInput);
+      
+      console.log(chalk.green('✅ Task type updated successfully'));
+      console.log(`
+${chalk.bold.blue(updatedTaskType.name)} (${updatedTaskType.id})
+${chalk.gray('Project ID:')} ${updatedTaskType.projectId}
+${chalk.gray('Template:')} ${updatedTaskType.template || 'No template'}
+${chalk.gray('Variables:')} ${updatedTaskType.variables && updatedTaskType.variables.length ? updatedTaskType.variables.join(', ') : 'None'}
+${chalk.gray('Duplicate Handling:')} ${updatedTaskType.duplicateHandling}
+${chalk.gray('Max Retries:')} ${updatedTaskType.maxRetries}
+${chalk.gray('Lease Duration:')} ${updatedTaskType.leaseDurationMinutes} minutes
+${chalk.gray('Created:')} ${new Date(updatedTaskType.createdAt).toLocaleString()}
+${chalk.gray('Updated:')} ${new Date(updatedTaskType.updatedAt).toLocaleString()}
+      `);
+      
+    } catch (error: any) {
+      console.error(chalk.red('❌ Failed to update task type:'), error.message);
+      process.exit(1);
+    }
+  })
+
   // Task Management Commands
-  .command('create-task <project> <type-id> <instructions>', 'Create a new task', (yargs) => {
+  .command('create-task <project>', 'Create a new task', (yargs) => {
     return yargs
       .positional('project', {
         describe: 'Project name or ID',
         type: 'string'
       })
-      .positional('type-id', {
-        describe: 'Task type ID',
-        type: 'string'
+      .option('instructions', {
+        alias: 'i',
+        type: 'string',
+        describe: 'Task instructions (required when using non-template task type)'
       })
-      .positional('instructions', {
-        describe: 'Task instructions',
-        type: 'string'
+      .option('type', {
+        alias: 't',
+        type: 'string',
+        describe: 'Task type ID or name (uses first available if not specified)'
+      })
+      .option('id', {
+        alias: 'i',
+        type: 'string',
+        describe: 'Custom task ID (generates sequential ID like "task-1" if not specified)'
+      })
+      .option('description', {
+        alias: 'd',
+        type: 'string',
+        describe: 'Human-readable task description'
       })
       .option('variables', {
         alias: 'vars',
         type: 'string',
         describe: 'Variables as JSON string (e.g., \'{"key": "value"}\')'
-      })
-      .option('batch-id', {
-        alias: 'b',
-        type: 'string',
-        describe: 'Batch ID for grouping tasks'
       });
   }, async (argv) => {
     const services = await initializeServices();
@@ -437,29 +693,168 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
         process.exit(1);
       }
       
-      // Parse variables if provided
-      let variables: Record<string, string> | undefined;
-      if (argv.variables) {
-        try {
-          variables = JSON.parse(argv.variables);
-        } catch (error) {
-          console.error(chalk.red('❌ Invalid variables JSON:'), error);
+      // Get all task types for the project
+      const taskTypes = await services.taskType.listTaskTypes(project.id);
+      
+      if (taskTypes.length === 0) {
+        console.error(chalk.red(`❌ No task types found in project '${project.name}'. Create a task type first.`));
+        process.exit(1);
+      }
+      
+      // Find task type by name or ID, or use first available
+      let taskType: any;
+      let usingDefaultType = false;
+      
+      if (argv.type) {
+        taskType = taskTypes.find(tt => tt.name === argv.type! || tt.id === argv.type!);
+        if (!taskType) {
+          console.error(chalk.red(`❌ Task type '${argv.type}' not found in project '${project.name}'`));
           process.exit(1);
+        }
+      } else {
+        if (taskTypes.length === 0) {
+          console.error(chalk.red('❌ No task types available'));
+          process.exit(1);
+        }
+        taskType = taskTypes[0];
+        usingDefaultType = true;
+        console.log(chalk.gray(`Using task type: ${taskType.name}`));
+      }
+      
+      // Determine if we need instructions or template variables
+      let finalInstructions = '';
+      let variables: Record<string, string> | undefined;
+      
+      if (taskType.template) {
+        // Task type has template - use variables, instructions not needed
+        if (argv.variables) {
+          try {
+            variables = JSON.parse(argv.variables);
+          } catch (error) {
+            console.error(chalk.red('❌ Invalid variables JSON:'), error);
+            process.exit(1);
+          }
+        }
+        // Template will be processed by TaskService
+        finalInstructions = ''; // Will be replaced by template interpolation
+      } else {
+        // No template - instructions are required
+        if (!argv.instructions) {
+          console.error(chalk.red('❌ Instructions are required when using task type without template'));
+          process.exit(1);
+        }
+        finalInstructions = argv.instructions;
+        
+        // Parse variables if provided (for custom task types without templates)
+        if (argv.variables) {
+          try {
+            variables = JSON.parse(argv.variables);
+          } catch (error) {
+            console.error(chalk.red('❌ Invalid variables JSON:'), error);
+            process.exit(1);
+          }
         }
       }
       
       const task = await services.task.createTask({
         projectId: project.id,
-        typeId: argv['type-id']!,
-        instructions: argv.instructions!,
-        variables,
-        batchId: argv['batch-id']
+        typeId: taskType.id,
+        id: argv.id,
+        description: argv.description,
+        instructions: finalInstructions,
+        variables
       });
       
       console.log(chalk.green('✅ Task created successfully:'));
-      console.log(formatTask(task));
+      console.log(await formatTask(task, services, { verbose: false }));
     } catch (error: any) {
       console.error(chalk.red('❌ Failed to create task:'), error.message);
+      process.exit(1);
+    }
+  })
+  
+  .command('create-tasks-bulk <project> <tasks-file>', 'Create multiple tasks from JSON file', (yargs) => {
+    return yargs
+      .positional('project', {
+        describe: 'Project name or ID',
+        type: 'string'
+      })
+      .positional('tasks-file', {
+        describe: 'JSON file containing array of tasks (or @- for stdin)',
+        type: 'string'
+      })
+      .option('format', {
+        alias: 'f',
+        type: 'string',
+        choices: ['table', 'detailed'],
+        describe: 'Output format for created tasks',
+        default: 'table'
+      });
+  }, async (argv) => {
+    const services = await initializeServices();
+    try {
+      // Find project by name or ID
+      const projects = await services.project.listProjects(true);
+      const project = projects.find(p => p.name === argv.project || p.id === argv.project);
+      if (!project) {
+        console.error(chalk.red(`❌ Project '${argv.project}' not found`));
+        process.exit(1);
+      }
+
+      // Read tasks from file or stdin
+      let tasksJson: string;
+      if (argv['tasks-file'] === '@-') {
+        // Read from stdin
+        tasksJson = await new Promise((resolve, reject) => {
+          let input = '';
+          process.stdin.on('data', chunk => input += chunk);
+          process.stdin.on('end', () => resolve(input));
+          process.stdin.on('error', reject);
+        });
+      } else {
+        // Read from file
+        tasksJson = readContentFromFileOrValue(argv['tasks-file']!);
+      }
+
+      // Parse JSON
+      let tasks: any[];
+      try {
+        tasks = JSON.parse(tasksJson);
+      } catch (error) {
+        console.error(chalk.red('❌ Invalid JSON in tasks file:'), error);
+        process.exit(1);
+      }
+
+      if (!Array.isArray(tasks)) {
+        console.error(chalk.red('❌ Tasks file must contain an array of tasks'));
+        process.exit(1);
+      }
+
+      // Create tasks in bulk
+      const result = await services.task.createTasksBulk(project.id, tasks);
+      
+      console.log(chalk.green(`✅ Bulk task creation completed:`));
+      console.log(chalk.gray(`Tasks created: ${result.tasksCreated}`));
+      
+      if (result.errors.length > 0) {
+        console.log(chalk.red(`Errors: ${result.errors.length}`));
+        result.errors.forEach(error => {
+          console.error(chalk.red(`  - ${error}`));
+        });
+      }
+
+      if (result.createdTasks.length > 0) {
+        console.log(chalk.bold('\nCreated tasks:'));
+        if (argv.format === 'table') {
+          console.log(formatTable(result.createdTasks, ['id', 'typeId', 'status', 'createdAt']));
+        } else {
+          for (const task of result.createdTasks) {
+            console.log(await formatTask(task, services, { verbose: false }));
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error(chalk.red('❌ Failed to create tasks in bulk:'), error.message);
       process.exit(1);
     }
   })
@@ -480,11 +875,6 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
         alias: 't',
         type: 'string',
         describe: 'Filter by task type ID'
-      })
-      .option('batch-id', {
-        alias: 'b',
-        type: 'string',
-        describe: 'Filter by batch ID'
       })
       .option('assigned-to', {
         alias: 'a',
@@ -526,7 +916,6 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
       const filters: TaskFilters = {
         status: argv.status as TaskFilters['status'],
         typeId: argv['type-id'],
-        batchId: argv['batch-id'],
         assignedTo: argv['assigned-to'],
         limit: argv.limit,
         offset: argv.offset
@@ -542,7 +931,9 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
       if (argv.format === 'table') {
         console.log(formatTable(tasks, ['id', 'typeId', 'status', 'assignedTo', 'retryCount', 'createdAt']));
       } else {
-        tasks.forEach(task => console.log(formatTask(task)));
+        for (const task of tasks) {
+          console.log(await formatTask(task, services, { verbose: false }));
+        }
       }
     } catch (error: any) {
       console.error(chalk.red('❌ Failed to list tasks:'), error.message);
@@ -567,7 +958,7 @@ ${chalk.gray('Updated:')} ${new Date(taskType.updatedAt).toLocaleString()}
         process.exit(1);
       }
       
-      console.log(formatTask(task));
+      console.log(await formatTask(task, services, { verbose: true }));
     } catch (error: any) {
       console.error(chalk.red('❌ Failed to get task:'), error.message);
       process.exit(1);
@@ -658,7 +1049,7 @@ ${chalk.yellow('⚠️  Save the API key - it will not be shown again!')}
       }
       
       console.log(chalk.green('✅ Task assigned:'));
-      console.log(formatTask(task));
+      console.log(await formatTask(task, services, { verbose: true }));
     } catch (error: any) {
       console.error(chalk.red('❌ Failed to get next task:'), error.message);
       process.exit(1);

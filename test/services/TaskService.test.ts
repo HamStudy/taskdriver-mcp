@@ -33,7 +33,8 @@ describe('TaskService', () => {
 
     const taskType = await taskTypeService.createTaskType({
       projectId,
-      name: 'test-task-type'
+      name: 'test-task-type',
+      template: 'Test task for {{resource}}'
     });
     taskTypeId = taskType.id;
   });
@@ -50,7 +51,8 @@ describe('TaskService', () => {
       const input = {
         projectId,
         typeId: taskTypeId,
-        instructions: 'Test task instructions'
+        instructions: 'Test task instructions',
+        variables: { resource: 'test-resource' }
       };
 
       const task = await taskService.createTask(input);
@@ -58,7 +60,7 @@ describe('TaskService', () => {
       expect(task.id).toBeDefined();
       expect(task.projectId).toBe(projectId);
       expect(task.typeId).toBe(taskTypeId);
-      expect(task.instructions).toBe('Test task instructions');
+      expect(task.instructions).toBe('Test task for test-resource');
       expect(task.status).toBe('queued');
       expect(task.retryCount).toBe(0);
       expect(task.maxRetries).toBe(3); // Default from task type
@@ -71,12 +73,12 @@ describe('TaskService', () => {
         projectId,
         typeId: taskTypeId,
         instructions: 'Task with variables',
-        variables: { key: 'value', number: '42' }
+        variables: { resource: 'test-resource', key: 'value', number: '42' }
       };
 
       const task = await taskService.createTask(input);
 
-      expect(task.variables).toEqual({ key: 'value', number: '42' });
+      expect(task.variables).toEqual({ resource: 'test-resource', key: 'value', number: '42' });
     });
 
     it('should create task with batch ID', async () => {
@@ -85,6 +87,7 @@ describe('TaskService', () => {
         projectId,
         typeId: taskTypeId,
         instructions: 'Batch task',
+        variables: { resource: 'test-resource' },
         batchId
       };
 
@@ -97,7 +100,8 @@ describe('TaskService', () => {
       const input = {
         projectId,
         typeId: taskTypeId,
-        instructions: '' // Invalid empty instructions
+        instructions: '', // Invalid empty instructions
+        variables: { resource: 'test-resource' }
       };
 
       await expect(taskService.createTask(input))
@@ -108,7 +112,8 @@ describe('TaskService', () => {
       const input = {
         projectId: 'non-existent-project',
         typeId: taskTypeId,
-        instructions: 'Test task'
+        instructions: 'Test task',
+        variables: { resource: 'test-resource' }
       };
 
       await expect(taskService.createTask(input))
@@ -119,7 +124,8 @@ describe('TaskService', () => {
       const input = {
         projectId,
         typeId: 'non-existent-type',
-        instructions: 'Test task'
+        instructions: 'Test task',
+        variables: { resource: 'test-resource' }
       };
 
       await expect(taskService.createTask(input))
@@ -131,6 +137,7 @@ describe('TaskService', () => {
       const failTaskType = await taskTypeService.createTaskType({
         projectId,
         name: 'fail-duplicate-type',
+        template: 'Fail task for {{id}}',
         duplicateHandling: 'fail'
       });
 
@@ -138,7 +145,7 @@ describe('TaskService', () => {
         projectId,
         typeId: failTaskType.id,
         instructions: 'Duplicate task',
-        variables: { key: 'value' }
+        variables: { id: 'test-id', key: 'value' }
       };
 
       await taskService.createTask(input);
@@ -152,6 +159,7 @@ describe('TaskService', () => {
       const ignoreTaskType = await taskTypeService.createTaskType({
         projectId,
         name: 'ignore-duplicate-type',
+        template: 'Ignore task for {{id}}',
         duplicateHandling: 'ignore'
       });
 
@@ -159,7 +167,7 @@ describe('TaskService', () => {
         projectId,
         typeId: ignoreTaskType.id,
         instructions: 'Duplicate task',
-        variables: { key: 'value' }
+        variables: { id: 'test-id', key: 'value' }
       };
 
       const task1 = await taskService.createTask(input);
@@ -174,14 +182,15 @@ describe('TaskService', () => {
       const created = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Retrieve task'
+        instructions: 'Retrieve task',
+        variables: { resource: 'test-resource' }
       });
 
       const retrieved = await taskService.getTask(created.id);
 
       expect(retrieved).not.toBeNull();
       expect(retrieved!.id).toBe(created.id);
-      expect(retrieved!.instructions).toBe('Retrieve task');
+      expect(retrieved!.instructions).toBe('Test task for test-resource');
     });
 
     it('should return null for non-existent task', async () => {
@@ -196,19 +205,22 @@ describe('TaskService', () => {
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Queued task 1'
+        instructions: 'Queued task 1',
+        variables: { resource: 'resource-1' }
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Queued task 2'
+        instructions: 'Queued task 2',
+        variables: { resource: 'resource-2' }
       });
 
       const runningTask = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Running task'
+        instructions: 'Running task',
+        variables: { resource: 'resource-3' }
       });
 
       // Manually set task to running state
@@ -274,13 +286,15 @@ describe('TaskService', () => {
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'First task'
+        instructions: 'First task',
+        variables: { resource: 'resource-1' }
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Second task'
+        instructions: 'Second task',
+        variables: { resource: 'resource-2' }
       });
     });
 
@@ -330,7 +344,8 @@ describe('TaskService', () => {
       const task = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Assignment test task'
+        instructions: 'Assignment test task',
+        variables: { resource: 'test-resource' }
       });
       taskId = task.id;
 
@@ -352,7 +367,8 @@ describe('TaskService', () => {
       const unassignedTask = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Unassigned task'
+        instructions: 'Unassigned task',
+        variables: { resource: 'test-resource' }
       });
 
       await expect(taskService.validateTaskAssignment(unassignedTask.id, agentName))
@@ -372,7 +388,8 @@ describe('TaskService', () => {
       const task = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Lease test task'
+        instructions: 'Lease test task',
+        variables: { resource: 'test-resource' }
       });
       taskId = task.id;
 
@@ -405,19 +422,22 @@ describe('TaskService', () => {
       await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Queued task'
+        instructions: 'Queued task',
+        variables: { resource: 'resource-1' }
       });
 
       const runningTask = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Running task'
+        instructions: 'Running task',
+        variables: { resource: 'resource-2' }
       });
 
       const expiredTask = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Expired task'
+        instructions: 'Expired task',
+        variables: { resource: 'resource-3' }
       });
 
       // Assign tasks and manipulate lease times
@@ -459,13 +479,15 @@ describe('TaskService', () => {
       const task1 = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Task 1'
+        instructions: 'Task 1',
+        variables: { resource: 'resource-1' }
       });
 
       const task2 = await taskService.createTask({
         projectId,
         typeId: taskTypeId,
-        instructions: 'Task 2'
+        instructions: 'Task 2',
+        variables: { resource: 'resource-2' }
       });
 
       await taskService.getNextTaskForAgent(projectId, 'agent1');

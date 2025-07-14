@@ -18,6 +18,14 @@ export class ProjectService {
    */
   async createProject(input: ProjectCreateInput): Promise<Project> {
     const validatedInput = validate(createProjectSchema, input);
+    
+    // Check for duplicate project names
+    const existingProjects = await this.storage.listProjects(true); // Include closed projects
+    const duplicate = existingProjects.find(p => p.name === validatedInput.name);
+    if (duplicate) {
+      throw new Error(`Project with name '${validatedInput.name}' already exists`);
+    }
+    
     return this.storage.createProject(validatedInput);
   }
 
@@ -35,6 +43,15 @@ export class ProjectService {
     const project = await this.storage.getProject(projectId);
     if (!project) {
       throw new Error(`Project ${projectId} not found`);
+    }
+
+    // Check for duplicate names if name is being changed
+    if (input.name && input.name !== project.name) {
+      const existingProjects = await this.storage.listProjects(true); // Include closed projects
+      const duplicate = existingProjects.find(p => p.name === input.name && p.id !== projectId);
+      if (duplicate) {
+        throw new Error(`Project with name '${input.name}' already exists`);
+      }
     }
 
     return this.storage.updateProject(projectId, input);

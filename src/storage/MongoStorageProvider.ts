@@ -24,8 +24,6 @@ import {
   Agent, 
   AgentCreateInput, 
   AgentUpdateInput,
-  BatchStatus,
-  BatchCreateResult,
   TaskAttempt,
   Session,
   SessionCreateInput,
@@ -119,7 +117,6 @@ export class MongoStorageProvider extends BaseStorageProvider {
     await this.collections.tasks.createIndex({ status: 1 });
     await this.collections.tasks.createIndex({ typeId: 1 });
     await this.collections.tasks.createIndex({ assignedTo: 1 });
-    await this.collections.tasks.createIndex({ batchId: 1 });
     await this.collections.tasks.createIndex({ leaseExpiresAt: 1 });
     await this.collections.tasks.createIndex({ createdAt: -1 });
     // Compound index for task assignment (critical for performance)
@@ -203,6 +200,7 @@ export class MongoStorageProvider extends BaseStorageProvider {
       id: projectId,
       name: input.name,
       description: input.description,
+      instructions: input.instructions,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -477,17 +475,45 @@ export class MongoStorageProvider extends BaseStorageProvider {
         }
       }
 
+      // Generate or validate task ID
+      let taskId: string;
+      if (input.id) {
+        // Check if custom ID already exists
+        const existingTask = await collections.tasks.findOne({ 
+          _id: input.id,
+          projectId: input.projectId 
+        });
+        if (existingTask) {
+          throw new Error(`Task with ID '${input.id}' already exists in this project`);
+        }
+        taskId = input.id;
+      } else {
+        // Generate sequential ID like 'task-1', 'task-2', etc.
+        let counter = 1;
+        do {
+          taskId = `task-${counter}`;
+          counter++;
+        } while (await collections.tasks.findOne({ 
+          _id: taskId,
+          projectId: input.projectId 
+        }));
+      }
+
+      // Generate description if not provided
+      const description = input.description || 
+        (taskType.name ? `Task of type ${taskType.name}` : 'Default task type');
+
       const now = new Date();
       const task: Task = {
-        id: uuidv4(),
+        id: taskId,
         projectId: input.projectId,
         typeId: input.typeId,
+        description,
         instructions: input.instructions,
         variables: input.variables,
         status: 'queued',
         retryCount: 0,
         maxRetries: taskType.maxRetries,
-        batchId: input.batchId,
         createdAt: now,
         attempts: [],
       };
@@ -534,17 +560,45 @@ export class MongoStorageProvider extends BaseStorageProvider {
           }
         }
 
+        // Generate or validate task ID
+        let taskId: string;
+        if (input.id) {
+          // Check if custom ID already exists
+          const existingTask = await collections.tasks.findOne({ 
+            _id: input.id,
+            projectId: input.projectId 
+          });
+          if (existingTask) {
+            throw new Error(`Task with ID '${input.id}' already exists in this project`);
+          }
+          taskId = input.id;
+        } else {
+          // Generate sequential ID like 'task-1', 'task-2', etc.
+          let counter = 1;
+          do {
+            taskId = `task-${counter}`;
+            counter++;
+          } while (await collections.tasks.findOne({ 
+            _id: taskId,
+            projectId: input.projectId 
+          }));
+        }
+
+        // Generate description if not provided
+        const description = input.description || 
+          (taskType.name ? `Task of type ${taskType.name}` : 'Default task type');
+
         const now = new Date();
         const task: Task = {
-          id: uuidv4(),
+          id: taskId,
           projectId: input.projectId,
           typeId: input.typeId,
+          description,
           instructions: input.instructions,
           variables: input.variables,
           status: 'queued',
           retryCount: 0,
           maxRetries: taskType.maxRetries,
-          batchId: input.batchId,
           createdAt: now,
           attempts: [],
         };
@@ -613,9 +667,6 @@ export class MongoStorageProvider extends BaseStorageProvider {
       }
       if (filters.assignedTo) {
         query.assignedTo = filters.assignedTo;
-      }
-      if (filters.batchId) {
-        query.batchId = filters.batchId;
       }
       if (filters.typeId) {
         query.typeId = filters.typeId;
@@ -1154,56 +1205,6 @@ export class MongoStorageProvider extends BaseStorageProvider {
     );
   }
 
-  // Batch operations (simplified implementations)
-  async createTasksBulk(projectId: string, tasks: TaskInput[]): Promise<BatchCreateResult> {
-    // Simplified implementation - could be optimized with bulk operations
-    const batchId = uuidv4();
-    const createdTasks: Task[] = [];
-    const errors: string[] = [];
-    
-    for (const taskInput of tasks) {
-      try {
-        const task = await this.createTask({
-          ...taskInput,
-          projectId,
-          batchId
-        });
-        createdTasks.push(task);
-      } catch (error) {
-        errors.push(`Failed to create task: ${error}`);
-      }
-    }
-    
-    return {
-      batchId,
-      tasksCreated: createdTasks.length,
-      errors
-    };
-  }
-
-  async getBatchStatus(batchId: string): Promise<BatchStatus> {
-    this.ensureInitialized();
-    const collections = this.ensureCollections();
-    
-    const tasks = await collections.tasks.find({ batchId }).toArray();
-    
-    const tasksByStatus = tasks.reduce((acc, task) => {
-      acc[task.status] = (acc[task.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const task = tasks[0];
-    return {
-      batchId,
-      projectId: task?.projectId || '',
-      total: tasks.length,
-      completed: tasksByStatus.completed || 0,
-      failed: tasksByStatus.failed || 0,
-      running: tasksByStatus.running || 0,
-      queued: tasksByStatus.queued || 0,
-      createdAt: task?.createdAt || new Date()
-    };
-  }
 
   // Utility operations
   async findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null> {
