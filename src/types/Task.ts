@@ -1,0 +1,72 @@
+export interface Task {
+  id: string;
+  projectId: string;
+  typeId: string;
+  instructions: string;  // Final instructions (template filled)
+  variables?: Record<string, string>;  // Variable values
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  assignedTo?: string;  // Agent name
+  leaseExpiresAt?: Date;  // When current lease expires (for running tasks)
+  retryCount: number;  // Number of times this task has been retried
+  maxRetries: number;  // Maximum retries allowed (from task type or project default)
+  batchId?: string;  // Optional batch identifier for bulk operations
+  createdAt: Date;
+  updatedAt?: Date;
+  assignedAt?: Date;
+  completedAt?: Date;
+  failedAt?: Date;
+  result?: TaskResult;
+  attempts: TaskAttempt[];
+}
+
+export interface TaskAttempt {
+  id: string;
+  agentName: string;
+  startedAt: Date;
+  completedAt?: Date;
+  status: 'running' | 'completed' | 'failed' | 'timeout';
+  explanation?: string;
+  failureReason?: 'agent_reported' | 'timeout' | 'server_error';
+  leaseExpiresAt?: Date;  // When this attempt's lease expires
+  result?: TaskResult;
+}
+
+export interface TaskCreateInput {
+  projectId: string;
+  typeId: string;
+  instructions: string;
+  variables?: Record<string, string>;
+  batchId?: string;
+}
+
+export interface TaskUpdateInput {
+  status?: Task['status'];
+  assignedTo?: string;
+  leaseExpiresAt?: Date;
+  retryCount?: number;
+}
+
+export interface TaskFilters {
+  status?: Task['status'];
+  assignedTo?: string;
+  batchId?: string;
+  typeId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskResult {
+  success: boolean;
+  output?: string;
+  error?: string;
+  explanation?: string;
+  duration?: number;
+  metadata?: Record<string, any>;
+  canRetry?: boolean;  // Only for failed tasks
+}
+
+export interface TaskInput {
+  typeId: string;
+  instructions: string;
+  variables?: Record<string, string>;
+}
