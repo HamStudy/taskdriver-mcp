@@ -68,6 +68,9 @@ export interface CommandDefinition<T extends readonly CommandParameter[] = reado
   // Optional metadata
   examples?: string[];
   notes?: string;
+  
+  // Enhanced discoverability metadata for LLM agents
+  discoverability?: ToolDiscoverability;
 }
 
 // Result format for consistent output
@@ -76,4 +79,28 @@ export interface CommandResult {
   data?: any;
   error?: string;
   message?: string;
+}
+
+// Enhanced discoverability metadata for LLM agents
+export interface ToolDiscoverability {
+  /** Keywords that should trigger consideration of this tool */
+  triggerKeywords: string[];
+  /** Common user intent patterns that map to this tool */
+  userIntentPatterns: string[];
+  /** When to use this tool (context and conditions) */
+  useWhen: string[];
+  /** What typically comes before this tool in workflows */
+  typicalPredecessors: string[];
+  /** What typically comes after this tool in workflows */
+  typicalSuccessors: string[];
+  /** Common workflow patterns this tool participates in */
+  workflowPatterns: string[];
+  /** Prerequisites that must be met before using this tool */
+  prerequisites: string[];
+  /** What the tool returns and how to interpret results */
+  expectedOutcomes: string[];
+  /** Common error conditions and how to handle them */
+  errorGuidance: string[];
+  /** Anti-patterns - when NOT to use this tool */
+  antiPatterns: string[];
 }

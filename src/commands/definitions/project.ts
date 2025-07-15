@@ -52,6 +52,18 @@ export const createProject: CommandDefinition<typeof createProjectParams> = {
   cliName: 'create-project',
   description: 'Create a new project workspace for organizing tasks and agents. Use this when starting a new workflow, breaking down complex work into manageable pieces, or organizing tasks by domain/topic. Projects contain task types (templates), tasks (work items), and agents (workers).',
   parameters: createProjectParams,
+  discoverability: {
+    triggerKeywords: ['create', 'new', 'project', 'workspace', 'organize', 'start', 'begin', 'initialize'],
+    userIntentPatterns: ['I want to start a new project', 'Create a workspace for tasks', 'Set up a new workflow'],
+    useWhen: ['Starting a new workflow or initiative', 'Need to organize tasks by domain or topic', 'Setting up a structured work environment'],
+    typicalPredecessors: ['system initialization', 'planning phase'],
+    typicalSuccessors: ['create_task_type', 'create_task', 'get_next_task'],
+    workflowPatterns: ['project-setup-workflow', 'task-organization-workflow'],
+    prerequisites: ['Clear project requirements', 'Defined project scope'],
+    expectedOutcomes: ['Project ID for subsequent operations', 'Workspace ready for task types and tasks'],
+    errorGuidance: ['Check for duplicate project names', 'Verify required parameters are provided'],
+    antiPatterns: ['Creating projects for single tasks', 'Using when project already exists']
+  },
   async handler(context, args) {
     const description = readContentFromFileOrValue(args.description);
     const instructions = args.instructions ? readContentFromFileOrValue(args.instructions) : undefined;

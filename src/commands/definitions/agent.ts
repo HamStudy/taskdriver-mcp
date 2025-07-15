@@ -36,6 +36,18 @@ export const getNextTask: CommandDefinition<typeof getNextTaskParams> = {
   cliName: 'get-next-task',
   description: 'Get the next available task from the project queue. If agentName is provided and has an existing task lease, that task is resumed. Otherwise assigns a new task. Agent names are only used for reconnection after disconnects.',
   parameters: getNextTaskParams,
+  discoverability: {
+    triggerKeywords: ['get', 'next', 'task', 'assign', 'work', 'queue', 'pull', 'fetch', 'receive'],
+    userIntentPatterns: ['I need work to do', 'Get me the next task', 'What should I work on next', 'Pull from task queue'],
+    useWhen: ['Agent is ready to work on tasks', 'Need to resume interrupted work', 'Starting work session'],
+    typicalPredecessors: ['create_task', 'create_tasks_bulk', 'complete_task', 'fail_task'],
+    typicalSuccessors: ['complete_task', 'fail_task', 'extend_task_lease'],
+    workflowPatterns: ['agent-work-loop', 'task-processing-workflow'],
+    prerequisites: ['Project exists with queued tasks', 'Agent ready to work'],
+    expectedOutcomes: ['Task with full instructions', 'Task lease for exclusive access', 'Agent name for reconnection'],
+    errorGuidance: ['Check if project has available tasks', 'Verify project exists'],
+    antiPatterns: ['Getting tasks without ability to work on them', 'Multiple agents using same name simultaneously']
+  },
   async handler(context, args) {
     // Find project
     const projects = await context.project.listProjects(true);
@@ -133,7 +145,7 @@ const completeTaskParams = [
   {
     name: 'agentName',
     type: 'string',
-    description: 'Agent name',
+    description: 'Agent name (from get_next_task response)',
     required: true,
     positional: true
   },
@@ -218,7 +230,7 @@ const failTaskParams = [
   {
     name: 'agentName',
     type: 'string',
-    description: 'Agent name',
+    description: 'Agent name (from get_next_task response)',
     required: true,
     positional: true
   },
@@ -298,7 +310,7 @@ const extendLeaseParams = [
   {
     name: 'agentName',
     type: 'string',
-    description: 'Agent name',
+    description: 'Agent name (from get_next_task response)',
     required: true,
     positional: true
   },

@@ -159,7 +159,7 @@ Please help me:
 1. Create or use the project "${project_name}"
 2. Set up a task type for "${processing_action}" operations
 3. Create individual tasks for each item in the list
-4. Explain how to assign agents and track progress${output_format ? `\n5. Set up the output format: ${output_format}` : ''}`,
+4. Explain how to launch ephemeral agents (use get_next_task with auto-generated names) and track progress${output_format ? `\n5. Set up the output format: ${output_format}` : ''}`,
           },
         },
       ],

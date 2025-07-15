@@ -53,9 +53,12 @@ export function generateMcpTool(def: CommandDefinition): Tool {
     }
   }
 
+  // Generate enhanced description with discoverability context
+  const enhancedDescription = generateEnhancedDescription(def);
+
   return {
     name: def.mcpName,
-    description: def.description,
+    description: enhancedDescription,
     inputSchema: {
       type: 'object',
       properties,
@@ -63,6 +66,54 @@ export function generateMcpTool(def: CommandDefinition): Tool {
       additionalProperties: false
     }
   };
+}
+
+/**
+ * Generate enhanced description with LLM agent discoverability hints
+ */
+function generateEnhancedDescription(def: CommandDefinition): string {
+  let description = def.description;
+
+  // Add discoverability metadata if available
+  if (def.discoverability) {
+    const disc = def.discoverability;
+    
+    // Add trigger keywords
+    if (disc.triggerKeywords?.length > 0) {
+      description += `\n\n🔍 KEYWORDS: ${disc.triggerKeywords.join(', ')}`;
+    }
+    
+    // Add usage context
+    if (disc.useWhen?.length > 0) {
+      description += `\n\n📋 USE WHEN: ${disc.useWhen.join(' | ')}`;
+    }
+    
+    // Add workflow context
+    if (disc.typicalPredecessors?.length > 0) {
+      description += `\n\n⬅️ TYPICALLY AFTER: ${disc.typicalPredecessors.join(', ')}`;
+    }
+    
+    if (disc.typicalSuccessors?.length > 0) {
+      description += `\n\n➡️ TYPICALLY BEFORE: ${disc.typicalSuccessors.join(', ')}`;
+    }
+    
+    // Add prerequisites
+    if (disc.prerequisites?.length > 0) {
+      description += `\n\n✅ PREREQUISITES: ${disc.prerequisites.join(' | ')}`;
+    }
+    
+    // Add expected outcomes
+    if (disc.expectedOutcomes?.length > 0) {
+      description += `\n\n📤 RETURNS: ${disc.expectedOutcomes.join(' | ')}`;
+    }
+    
+    // Add anti-patterns
+    if (disc.antiPatterns?.length > 0) {
+      description += `\n\n❌ AVOID WHEN: ${disc.antiPatterns.join(' | ')}`;
+    }
+  }
+
+  return description;
 }
 
 /**

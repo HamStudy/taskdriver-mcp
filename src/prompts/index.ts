@@ -8,15 +8,33 @@
 import { PromptDefinition } from './types.js';
 import { createProjectPrompt, trackProgressPrompt } from './definitions/project.js';
 import { batchProcessPrompt, breakDownWorkPrompt, processListPrompt } from './definitions/workflow.js';
+import { codeReviewWorkflowPrompt, fileProcessingPipelinePrompt, testGenerationWorkflowPrompt, documentationWorkflowPrompt } from './definitions/coding-workflows.js';
+import { logAnalysisPrompt, dataValidationPrompt, migrationTasksPrompt, securityAuditPrompt, configAuditPrompt, dataProcessingPrompt, deploymentChecksPrompt } from './definitions/work-scenarios.js';
 import { createPromptName } from './utils.js';
 
 // All prompt definitions
 const promptDefinitions: PromptDefinition[] = [
+  // Project & Task Management
   createProjectPrompt,
   trackProgressPrompt,
   batchProcessPrompt,
   breakDownWorkPrompt,
   processListPrompt,
+  
+  // Development Workflows
+  codeReviewWorkflowPrompt,
+  fileProcessingPipelinePrompt,
+  testGenerationWorkflowPrompt,
+  documentationWorkflowPrompt,
+  
+  // Operations & Maintenance
+  logAnalysisPrompt,
+  dataValidationPrompt,
+  migrationTasksPrompt,
+  securityAuditPrompt,
+  configAuditPrompt,
+  dataProcessingPrompt,
+  deploymentChecksPrompt,
 ];
 
 /**
