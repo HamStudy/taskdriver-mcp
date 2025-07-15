@@ -30,29 +30,16 @@ export class LeaseService {
         task.leaseExpiresAt && task.leaseExpiresAt < now
       );
 
-      // Reclaim expired tasks
+      // Reclaim expired tasks (no agent state to clean in lease-based model)
       for (const task of expiredTasks) {
         try {
-          // Get agent state before reclaiming the task
-          let agentToClean: any = null;
-          if (task.assignedTo) {
-            const agent = await this.storage.getAgentByName(task.assignedTo, projectId);
-            if (agent && agent.currentTaskId === task.id) {
-              agentToClean = agent;
-            }
-          }
-
           // Reclaim the task
           await this.reclaimExpiredTask(task);
           reclaimedTasks++;
 
-          // Clean up the agent state if needed
-          if (agentToClean) {
-            await this.storage.updateAgent(agentToClean.id, {
-              status: 'idle',
-              currentTaskId: undefined,
-              lastSeen: new Date()
-            });
+          // In the lease-based model, "cleaning agents" just means tracking 
+          // how many agent leases were reclaimed (1 per task)
+          if (task.assignedTo) {
             cleanedAgents++;
           }
         } catch (error) {
@@ -91,7 +78,8 @@ export class LeaseService {
     };
 
     // Fail the task with timeout reason - this will handle retry logic
-    await this.storage.failTask(task.id, timeoutResult, true);
+    // Note: In lease-based model, we need to provide agentName even for timeouts
+    await this.storage.failTask(task.id, task.assignedTo || 'unknown', timeoutResult, true);
 
     console.log(`✅ Task ${task.id} reclaimed and requeued for retry`);
   }

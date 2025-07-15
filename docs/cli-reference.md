@@ -337,95 +337,159 @@ bun run cli get-task "550e8400-e29b-41d4-a716-446655440000"
 
 ## Agent Management
 
-### register-agent
-
-Register a new agent for task execution.
-
-```bash
-bun run cli register-agent <project> <name> [options]
-```
-
-**Arguments:**
-- `project` - Project name or ID
-- `name` - Agent name
-
-**Options:**
-- `--capabilities, --caps <caps...>` - Agent capabilities (space-separated)
-
-**Examples:**
-```bash
-# Register basic agent
-bun run cli register-agent "ai-analysis" "security-agent"
-
-# Register agent with capabilities
-bun run cli register-agent "ai-analysis" "analysis-agent" --capabilities "security-analysis" "code-review" "performance-testing"
-```
+**Note**: Agents are now ephemeral queue workers, not persistent entities. They don't need registration - agents just get tasks from the queue using their name. Agent names are only used for reconnection after disconnects.
 
 ### get-next-task
 
-Get the next available task for an agent.
+Get the next available task for an agent. If the agent name has an existing task lease, that task is resumed. Otherwise, a new task is assigned.
 
 ```bash
-bun run cli get-next-task <agent-name> <project>
+bun run cli get-next-task <project> [agent-name]
 ```
 
 **Arguments:**
-- `agent-name` - Agent name
+- `project` - Project name or ID
+- `agent-name` - Agent name (optional - will be auto-generated if not provided)
+
+**Exit Codes:**
+- `0` - Task assigned successfully
+- `1` - No tasks available for assignment (use this for bash scripting)
+
+**Examples:**
+```bash
+# Get next task with specific agent name
+bun run cli get-next-task "ai-analysis" "security-agent"
+
+# Get next task with auto-generated agent name
+bun run cli get-next-task "ai-analysis"
+
+# Bash scripting example
+while bun run cli get-next-task "ai-analysis" "worker-1"; do
+    echo "Got task, processing..."
+    # Process task here
+    bun run cli complete-task "worker-1" "ai-analysis" "$TASK_ID" "Task completed"
+done
+```
+
+### peek-next-task
+
+Check if tasks are available in the project queue without assigning them. Perfect for bash scripts to check if work is available.
+
+```bash
+bun run cli peek-next-task <project>
+```
+
+**Arguments:**
+- `project` - Project name or ID
+
+**Exit Codes:**
+- `0` - Tasks are available
+- `1` - No tasks available
+
+**Examples:**
+```bash
+# Check if tasks are available
+bun run cli peek-next-task "ai-analysis"
+
+# Bash scripting example
+while bun run cli peek-next-task "ai-analysis"; do
+    echo "Tasks available, launching agent..."
+    # Launch agent to process tasks
+    bun run cli get-next-task "ai-analysis" "worker-$$" &
+done
+```
+
+### list-active-agents
+
+List agents currently working on tasks (agents with active task leases). This is for monitoring purposes - agents are ephemeral and only appear here when actively working.
+
+```bash
+bun run cli list-active-agents <project>
+```
+
+**Arguments:**
 - `project` - Project name or ID
 
 **Examples:**
 ```bash
-bun run cli get-next-task "security-agent" "ai-analysis"
+bun run cli list-active-agents "ai-analysis"
 ```
 
 ### complete-task
 
-Mark a task as completed with results.
+Mark a task as completed with results. This releases the task lease and makes the agent available for new work.
 
 ```bash
-bun run cli complete-task <agent-name> <project> <task-id> [options]
+bun run cli complete-task <agent-name> <project> <task-id> <result> [options]
 ```
 
 **Arguments:**
 - `agent-name` - Agent name
 - `project` - Project name or ID
 - `task-id` - Task ID
+- `result` - Task result (string or JSON, or @path/to/file.txt)
 
 **Options:**
-- `--result, -r <json>` - Task result as JSON string (default: `'{"success": true}'`)
+- `--outputs, -o <json>` - Structured outputs as JSON string
 
 **Examples:**
 ```bash
-# Complete task with default result
-bun run cli complete-task "security-agent" "ai-analysis" "task-id"
+# Complete task with simple result
+bun run cli complete-task "security-agent" "ai-analysis" "task-id" "Task completed successfully"
 
-# Complete task with custom result
-bun run cli complete-task "security-agent" "ai-analysis" "task-id" --result '{"status": "completed", "findings": ["vulnerability1", "vulnerability2"]}'
+# Complete task with JSON result
+bun run cli complete-task "security-agent" "ai-analysis" "task-id" '{"status": "completed", "findings": ["vulnerability1", "vulnerability2"]}'
+
+# Complete task with result from file
+bun run cli complete-task "security-agent" "ai-analysis" "task-id" "@result.txt"
+
+# Complete task with structured outputs
+bun run cli complete-task "security-agent" "ai-analysis" "task-id" "Analysis complete" --outputs '{"score": 95, "issues": []}'
 ```
 
 ### fail-task
 
-Mark a task as failed with error information.
+Mark a task as failed with error details and retry options. This releases the task lease and either requeues the task for retry or marks it permanently failed.
 
 ```bash
-bun run cli fail-task <agent-name> <project> <task-id> [options]
+bun run cli fail-task <agent-name> <project> <task-id> <error> [options]
 ```
 
 **Arguments:**
 - `agent-name` - Agent name
 - `project` - Project name or ID
 - `task-id` - Task ID
+- `error` - Error message
 
 **Options:**
-- `--result, -r <json>` - Failure result as JSON string (default: `'{"success": false, "error": "Task failed"}'`)
+- `--can-retry, -r` - Whether the task can be retried (default: true)
 
 **Examples:**
 ```bash
-# Fail task with default result
-bun run cli fail-task "security-agent" "ai-analysis" "task-id"
+# Fail task with default retry behavior
+bun run cli fail-task "security-agent" "ai-analysis" "task-id" "Network timeout occurred"
 
-# Fail task with custom error
-bun run cli fail-task "security-agent" "ai-analysis" "task-id" --result '{"success": false, "error": "Network timeout", "retryable": true}'
+# Fail task and prevent retry
+bun run cli fail-task "security-agent" "ai-analysis" "task-id" "Invalid input data" --can-retry false
+```
+
+### extend-lease
+
+Extend the lease on a running task by additional minutes. Use this for long-running operations to prevent the task from being reassigned to other agents.
+
+```bash
+bun run cli extend-lease <agent-name> <task-id> <minutes>
+```
+
+**Arguments:**
+- `agent-name` - Agent name
+- `task-id` - Task ID
+- `minutes` - Additional minutes to extend the lease
+
+**Examples:**
+```bash
+# Extend task lease by 30 minutes
+bun run cli extend-lease "security-agent" "task-id" 30
 ```
 
 ## Monitoring and Operations
@@ -518,10 +582,7 @@ bun run cli create-task-type "my-project" "analysis" --template "@analysis-templ
    bun run cli create-task-type "my-project" "analysis" --template "@analysis-template.md" -v "target" "focus"
    ```
 
-3. Register agents:
-   ```bash
-   bun run cli register-agent "my-project" "analysis-agent" --capabilities "code-analysis" "security-scan"
-   ```
+3. Agents don't need registration - they just start working by getting tasks from the queue
 
 ### Running Tasks
 
@@ -530,14 +591,54 @@ bun run cli create-task-type "my-project" "analysis" --template "@analysis-templ
    bun run cli create-task "my-project" -t "analysis" --variables '{"target": "webapp", "focus": "security"}'
    ```
 
-2. Agents get tasks:
+2. Agents get tasks from queue:
    ```bash
-   bun run cli get-next-task "analysis-agent" "my-project"
+   bun run cli get-next-task "my-project" "analysis-agent"
    ```
 
 3. Complete tasks:
    ```bash
-   bun run cli complete-task "analysis-agent" "my-project" "task-id" --result '{"status": "completed", "findings": []}'
+   bun run cli complete-task "analysis-agent" "my-project" "task-id" '{"status": "completed", "findings": []}'
+   ```
+
+### Bash Scripting for Automated Processing
+
+1. Simple worker loop:
+   ```bash
+   #!/bin/bash
+   AGENT_NAME="worker-$$"
+   while bun run cli get-next-task "my-project" "$AGENT_NAME"; do
+       echo "Processing task..."
+       # Your task processing logic here
+       bun run cli complete-task "$AGENT_NAME" "my-project" "$TASK_ID" "Task completed"
+   done
+   ```
+
+2. Check for available work before launching agents:
+   ```bash
+   #!/bin/bash
+   while bun run cli peek-next-task "my-project"; do
+       echo "Tasks available, launching worker..."
+       # Launch worker process
+       ./worker.sh "my-project" &
+       sleep 1
+   done
+   ```
+
+3. Parallel processing with multiple agents:
+   ```bash
+   #!/bin/bash
+   NUM_WORKERS=4
+   for i in $(seq 1 $NUM_WORKERS); do
+       (
+           while bun run cli get-next-task "my-project" "worker-$i"; do
+               echo "Worker $i processing task..."
+               # Process task
+               bun run cli complete-task "worker-$i" "my-project" "$TASK_ID" "Completed by worker $i"
+           done
+       ) &
+   done
+   wait  # Wait for all workers to finish
    ```
 
 ### Monitoring
@@ -552,7 +653,12 @@ bun run cli create-task-type "my-project" "analysis" --template "@analysis-templ
    bun run cli list-tasks "my-project" --status running
    ```
 
-3. Clean up expired leases:
+3. List agents currently working:
+   ```bash
+   bun run cli list-active-agents "my-project"
+   ```
+
+4. Clean up expired leases:
    ```bash
    bun run cli cleanup-leases "my-project"
    ```

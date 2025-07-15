@@ -1,34 +1,29 @@
-export interface Agent {
-  id: string;
+import { Task } from './Task.js';
+
+// Agent is now just a runtime concept for tracking active task assignments
+// No persistent storage - agents are ephemeral queue workers
+export interface AgentTaskAssignment {
+  agentName: string;
+  projectId: string;
+  taskId: string;
+  assignedAt: Date;
+  leaseExpiresAt: Date;
+}
+
+// Result of getting next task - includes lease information
+export interface TaskAssignmentResult {
+  task: Task | null;
+  agentName: string;  // Generated if not provided
+  leaseToken?: string;  // For lease renewal (optional feature)
+}
+
+// For backwards compatibility in some APIs that list "agents"
+// This is just a view of currently active assignments
+export interface AgentStatus {
   name: string;
   projectId: string;
-  sessionId?: string;
-  status: 'idle' | 'working' | 'disabled';
+  status: 'working' | 'idle';  // simplified - just working or idle
   currentTaskId?: string;
-  apiKey?: string;  // Authentication token for this agent
-  apiKeyHash?: string;  // Hashed version stored in database
-  lastSeen: Date;
-  connectedAt?: Date;
-  createdAt: Date;
-  capabilities?: string[];  // Optional: what task types this agent can handle
-}
-
-export interface AgentCreateInput {
-  name?: string;  // Auto-generated if not provided
-  projectId: string;
-  capabilities?: string[];
-  apiKeyHash?: string;  // For internal use during creation
-}
-
-export interface AgentUpdateInput {
-  name?: string;
-  status?: Agent['status'];
-  currentTaskId?: string;
-  lastSeen?: Date;
-  capabilities?: string[];
-}
-
-export interface AgentRegistrationResult {
-  agent: Agent;
-  apiKey: string;
+  assignedAt?: Date;
+  leaseExpiresAt?: Date;
 }

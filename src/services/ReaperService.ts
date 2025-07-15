@@ -1,5 +1,5 @@
 import { StorageProvider } from '../storage/index.js';
-import { Task, Project, Agent } from '../types/index.js';
+import { Task, Project } from '../types/index.js';
 import { ProjectService } from './ProjectService.js';
 
 /**
@@ -113,7 +113,7 @@ export class ReaperService {
     console.log(`Reaping task ${task.id}: ${reason}`);
 
     // Mark the task as failed due to lease expiry
-    await this.storage.failTask(task.id, {
+    await this.storage.failTask(task.id, task.assignedTo || 'unknown', {
       success: false,
       output: '',
       error: `Task reaped: ${reason}`,
@@ -124,59 +124,17 @@ export class ReaperService {
       },
     }, true); // Allow retry
 
-    // If the task was assigned to an agent, clean up the agent's state
-    if (task.assignedTo) {
-      try {
-        const agent = await this.storage.getAgentByName(task.assignedTo, task.projectId);
-        if (agent && agent.currentTaskId === task.id) {
-          await this.storage.updateAgent(agent.id, {
-            status: 'idle',
-            currentTaskId: undefined,
-            lastSeen: new Date(),
-          });
-        }
-      } catch (error) {
-        console.error(`Failed to clean up agent state for reaped task ${task.id}:`, error);
-      }
-    }
+    // In lease-based model, no agent state to clean up - leases are task-scoped
   }
 
   /**
-   * Check for agents that haven't been seen for a long time and mark them as idle
+   * In lease-based model, zombie agents don't exist since agents are ephemeral
+   * This method is kept for compatibility but is a no-op
    */
   private async reapZombieAgents(projectId: string, errors: string[]): Promise<void> {
-    const zombieThresholdMinutes = 30; // Consider agents zombie if not seen for 30 minutes
-    const zombieThreshold = new Date(Date.now() - zombieThresholdMinutes * 60 * 1000);
-
-    try {
-      const agents = await this.storage.listAgents(projectId);
-      
-      for (const agent of agents) {
-        if (agent.status === 'working' && agent.lastSeen < zombieThreshold) {
-          try {
-            console.log(`Marking zombie agent ${agent.name} as idle (last seen: ${agent.lastSeen})`);
-            
-            // If the agent has a current task, we need to handle it
-            if (agent.currentTaskId) {
-              const task = await this.storage.getTask(agent.currentTaskId);
-              if (task && task.status === 'running') {
-                await this.reapTask(task, `Agent ${agent.name} went zombie`);
-              }
-            }
-
-            // Mark agent as idle
-            await this.storage.updateAgent(agent.id, {
-              status: 'idle',
-              currentTaskId: undefined,
-            });
-          } catch (error: any) {
-            errors.push(`Failed to clean up zombie agent ${agent.name}: ${error.message}`);
-          }
-        }
-      }
-    } catch (error: any) {
-      errors.push(`Failed to reap zombie agents for project ${projectId}: ${error.message}`);
-    }
+    // In the lease-based model, agents are ephemeral and only exist 
+    // when they have active task leases. There are no "zombie agents"
+    // to clean up - just expired task leases.
   }
 
   /**

@@ -125,6 +125,16 @@ Handles agent failures gracefully:
 
 All tools have JSON schemas and comprehensive validation.
 
+### MCP Prompts (`src/prompts/`)
+5 workflow prompts that appear as slash commands in Claude Code:
+- `{prefix}:create-project` - Create new projects with setup guidance
+- `{prefix}:track-progress` - Monitor project and task progress
+- `{prefix}:batch-process` - Set up batch processing workflows
+- `{prefix}:break-down-work` - Break large tasks into manageable pieces
+- `{prefix}:process-list` - Process lists of items systematically
+
+Prompts are organized in clean modules with configurable prefix via `TASKDRIVER_MCP_PROMPT_PREFIX`.
+
 ### Configuration (`src/config/`)
 Environment-based configuration following 12-factor app principles:
 - Storage provider selection and configuration
@@ -138,6 +148,7 @@ TASKDRIVER_STORAGE_PROVIDER=file|mongodb|redis
 TASKDRIVER_HTTP_PORT=3000
 TASKDRIVER_LOG_LEVEL=info|debug|warn|error
 TASKDRIVER_SESSION_TIMEOUT=3600
+TASKDRIVER_MCP_PROMPT_PREFIX=taskdriver  # Configure MCP prompt prefix (default: taskdriver)
 ```
 
 ## Production Considerations
@@ -167,6 +178,11 @@ TASKDRIVER_SESSION_TIMEOUT=3600
 - **Redis**: High-performance, distributed scenarios
 
 ## Common Development Patterns
+
+### API Parameter Standards
+- **Task Type References**: Always use `type` parameter (not `typeId`) for task type references in all MCP tools and CLI commands. This parameter accepts either the task type ID or name.
+- **Project References**: Always use `projectId` parameter for project references, accepting either project ID or name.
+- **Bulk Operations**: Use `type` (not `typeId`) and `vars` (not `variables`) in bulk task creation arrays to match TaskInput interface.
 
 ### Adding New MCP Tools
 1. Define tool schema in `src/tools/index.ts`

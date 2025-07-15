@@ -1,8 +1,9 @@
 import { TaskDriverConfig } from '../config/index.js';
 import { StorageProvider } from './StorageProvider.js';
 import { FileStorageProvider } from './FileStorageProvider.js';
-import { MongoStorageProvider } from './MongoStorageProvider.js';
-import { RedisStorageProvider } from './RedisStorageProvider.js';
+// MongoDB and Redis providers temporarily disabled during lease-based migration
+// import { MongoStorageProvider } from './MongoStorageProvider.js';
+// import { RedisStorageProvider } from './RedisStorageProvider.js';
 
 /**
  * Create a storage provider based on configuration
@@ -22,21 +23,13 @@ export function createStorageProvider(config: TaskDriverConfig): StorageProvider
       if (!config.storage.connectionString) {
         throw new Error('MongoDB connection string is required when using MongoDB storage provider');
       }
-      return new MongoStorageProvider(
-        config.storage.connectionString,
-        config.storage.mongodb?.database || 'taskdriver',
-        true // Enable transactions in production
-      );
+      throw new Error('MongoDB storage provider temporarily disabled during lease-based migration. Use "file" storage provider.');
     
     case 'redis':
       if (!config.storage.connectionString) {
         throw new Error('Redis connection string is required when using Redis storage provider');
       }
-      return new RedisStorageProvider(
-        config.storage.connectionString,
-        config.storage.redis?.database || 0,
-        config.storage.redis?.keyPrefix || 'taskdriver:'
-      );
+      throw new Error('Redis storage provider temporarily disabled during lease-based migration. Use "file" storage provider.');
     
     default:
       throw new Error(`Unknown storage provider: ${config.storage.provider}`);
@@ -45,5 +38,6 @@ export function createStorageProvider(config: TaskDriverConfig): StorageProvider
 
 export * from './StorageProvider.js';
 export * from './FileStorageProvider.js';
-export * from './MongoStorageProvider.js';
-export * from './RedisStorageProvider.js';
+// MongoDB and Redis providers temporarily disabled during lease-based migration
+// export * from './MongoStorageProvider.js';
+// export * from './RedisStorageProvider.js';

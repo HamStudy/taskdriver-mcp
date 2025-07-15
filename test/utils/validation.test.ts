@@ -220,12 +220,21 @@ describe('Validation', () => {
       expect(() => validate(createTaskTypeSchema, validData)).not.toThrow();
     });
 
-    it('should accept minimal task type data', () => {
+    it('should accept minimal task type data with template', () => {
       const validData = {
+        name: 'test-task-type',
+        projectId: '83fae412-4a26-4660-bf80-41a8b8353b42',
+        template: 'Complete this task'
+      };
+      expect(() => validate(createTaskTypeSchema, validData)).not.toThrow();
+    });
+
+    it('should reject task type data without template', () => {
+      const invalidData = {
         name: 'test-task-type',
         projectId: '83fae412-4a26-4660-bf80-41a8b8353b42'
       };
-      expect(() => validate(createTaskTypeSchema, validData)).not.toThrow();
+      expect(() => validate(createTaskTypeSchema, invalidData)).toThrow();
     });
 
     it('should reject invalid task type data', () => {
@@ -244,7 +253,7 @@ describe('Validation', () => {
         typeId: '550e8400-e29b-41d4-a716-446655440000',
         instructions: 'Complete this task',
         variables: { action: 'test', target: 'system' },
-        batchId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        description: 'Test task description'
       };
       expect(() => validate(createTaskSchema, validData)).not.toThrow();
     });
@@ -252,8 +261,7 @@ describe('Validation', () => {
     it('should accept minimal task data', () => {
       const validData = {
         projectId: '83fae412-4a26-4660-bf80-41a8b8353b42',
-        typeId: '550e8400-e29b-41d4-a716-446655440000',
-        instructions: 'Complete this task'
+        typeId: '550e8400-e29b-41d4-a716-446655440000'
       };
       expect(() => validate(createTaskSchema, validData)).not.toThrow();
     });
@@ -272,8 +280,7 @@ describe('Validation', () => {
     it('should accept valid agent creation data', () => {
       const validData = {
         name: 'test-agent',
-        projectId: '83fae412-4a26-4660-bf80-41a8b8353b42',
-        capabilities: ['task1', 'task2']
+        projectId: '83fae412-4a26-4660-bf80-41a8b8353b42'
       };
       expect(() => validate(createAgentSchema, validData)).not.toThrow();
     });
@@ -300,7 +307,6 @@ describe('Validation', () => {
         projectId: '83fae412-4a26-4660-bf80-41a8b8353b42',
         status: 'running',
         assignedTo: 'test-agent',
-        batchId: '83fae412-4a26-4660-bf80-41a8b8353b42',
         typeId: '550e8400-e29b-41d4-a716-446655440000',
         limit: 50,
         offset: 0

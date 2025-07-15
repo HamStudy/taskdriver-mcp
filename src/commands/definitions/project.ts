@@ -50,7 +50,7 @@ export const createProject: CommandDefinition<typeof createProjectParams> = {
   name: 'createProject',
   mcpName: 'create_project',
   cliName: 'create-project',
-  description: 'Create a new project',
+  description: 'Create a new project workspace for organizing tasks and agents. Use this when starting a new workflow, breaking down complex work into manageable pieces, or organizing tasks by domain/topic. Projects contain task types (templates), tasks (work items), and agents (workers).',
   parameters: createProjectParams,
   async handler(context, args) {
     const description = readContentFromFileOrValue(args.description);
@@ -116,19 +116,21 @@ export const listProjects: CommandDefinition<typeof listProjectsParams> = {
   name: 'listProjects',
   mcpName: 'list_projects',
   cliName: 'list-projects',
-  description: 'List all projects',
+  description: 'List all projects with filtering options. Use this to find existing projects, check project status, or get an overview of all workspaces. Helpful for discovering what projects already exist before creating new ones.',
   parameters: listProjectsParams,
   async handler(context, args) {
-    const includeClosed = args.status === 'all' || args.status === 'closed' || args.includeClosed;
+    // Apply defaults for undefined parameters
+    const status = args.status ?? 'active';
+    const includeClosed = status === 'all' || status === 'closed' || args.includeClosed;
     const allProjects = await context.project.listProjects(includeClosed);
     
     // Apply client-side filtering and pagination
     let filteredProjects = allProjects;
-    if (args.status !== 'all') {
-      filteredProjects = allProjects.filter(p => p.status === args.status);
+    if (status !== 'all') {
+      filteredProjects = allProjects.filter(p => p.status === status);
     }
     
-    const projects = filteredProjects.slice(args.offset, args.offset + args.limit);
+    const projects = filteredProjects.slice(args.offset || 0, (args.offset || 0) + (args.limit || 100));
 
     return {
       success: true,
@@ -160,7 +162,7 @@ export const getProject: CommandDefinition<typeof getProjectParams> = {
   name: 'getProject',
   mcpName: 'get_project',
   cliName: 'get-project',
-  description: 'Get project details',
+  description: 'Get detailed information about a specific project including configuration, statistics, and metadata. Use this to understand project settings, check task counts, or verify project configuration before creating tasks.',
   parameters: getProjectParams,
   async handler(context, args) {
     // Find project by name or ID
@@ -180,6 +182,7 @@ export const getProject: CommandDefinition<typeof getProjectParams> = {
         id: project.id,
         name: project.name,
         description: project.description,
+        instructions: project.instructions,
         status: project.status,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
@@ -236,7 +239,7 @@ export const updateProject: CommandDefinition<typeof updateProjectParams> = {
   name: 'updateProject',
   mcpName: 'update_project',
   cliName: 'update-project',
-  description: 'Update project properties',
+  description: 'Update project properties such as description, instructions, status, or configuration. Use this to modify project settings, close completed projects, or update instructions for agents working on the project.',
   parameters: updateProjectParams,
   async handler(context, args) {
     // Find project
@@ -291,7 +294,7 @@ export const getProjectStats: CommandDefinition<typeof getProjectStatsParams> = 
   name: 'getProjectStats',
   mcpName: 'get_project_stats',
   cliName: 'get-project-stats',
-  description: 'Get project statistics',
+  description: 'Get comprehensive project statistics including task counts, completion rates, agent activity, and performance metrics. Use this to monitor progress, track completion status, or generate reports on project health and activity.',
   parameters: getProjectStatsParams,
   async handler(context, args) {
     // Find project

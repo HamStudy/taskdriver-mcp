@@ -7,7 +7,6 @@ export * from './Session.js';
 
 // Additional enums
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed';
-export type AgentStatus = 'idle' | 'working' | 'disabled';
 
 // Common utility types
 export interface PaginationOptions {

@@ -14,9 +14,8 @@ import {
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
-  Agent, 
-  AgentCreateInput, 
-  AgentUpdateInput,
+  TaskAssignmentResult,
+  AgentStatus,
   TaskAttempt,
   Session,
   SessionCreateInput,
@@ -36,7 +35,7 @@ interface ProjectData {
   project: Project;
   taskTypes: TaskType[];
   tasks: Task[];
-  agents: Agent[];
+  // No more persistent agents - they're ephemeral queue workers
 }
 
 /**
@@ -228,7 +227,6 @@ export class FileStorageProvider extends BaseStorageProvider {
       project,
       taskTypes: [],
       tasks: [],
-      agents: [],
     };
 
     await this.writeProjectData(projectId, projectData);
@@ -527,19 +525,58 @@ export class FileStorageProvider extends BaseStorageProvider {
   // We'll continue with the rest of the methods...
   // This is getting quite long, so I'll implement the critical atomic operations next
 
-  // CRITICAL: Atomic task assignment
-  async assignTask(projectId: string, agentName: string): Promise<Task | null> {
-    return this.withProjectLock(projectId, async (data) => {
+  // CRITICAL: Lease-based task assignment for ephemeral agents
+  async getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult> {
+    return this.withProjectLock<TaskAssignmentResult>(projectId, async (data) => {
+      const now = new Date();
+      
+      // Generate agent name if not provided
+      const finalAgentName = agentName || `agent-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      
+      // If agent name was provided, check if they have an existing running task
+      if (agentName) {
+        const existingTask = data.tasks.find(t => 
+          t.assignedTo === agentName && 
+          t.status === 'running' && 
+          t.leaseExpiresAt && 
+          t.leaseExpiresAt > now
+        );
+        
+        if (existingTask) {
+          // Resume existing task
+          return {
+            data,
+            result: {
+              task: existingTask,
+              agentName: finalAgentName
+            }
+          };
+        }
+      }
+      
       // Find first queued task
       const taskIndex = data.tasks.findIndex(t => t.status === 'queued');
       
       if (taskIndex === -1) {
-        return { data, result: null };
+        // No tasks available
+        return {
+          data,
+          result: {
+            task: null,
+            agentName: finalAgentName
+          }
+        };
       }
 
       const task = data.tasks[taskIndex];
       if (!task) {
-        return { data, result: null };
+        return {
+          data,
+          result: {
+            task: null,
+            agentName: finalAgentName
+          }
+        };
       }
       
       const taskType = data.taskTypes.find(tt => tt.id === task.typeId);
@@ -548,12 +585,11 @@ export class FileStorageProvider extends BaseStorageProvider {
       }
 
       // Update task to running state with lease
-      const now = new Date();
       const leaseExpiresAt = new Date(now.getTime() + taskType.leaseDurationMinutes * 60 * 1000);
       
       const attempt: TaskAttempt = {
         id: uuidv4(),
-        agentName,
+        agentName: finalAgentName,
         startedAt: now,
         status: 'running',
         leaseExpiresAt,
@@ -562,7 +598,7 @@ export class FileStorageProvider extends BaseStorageProvider {
       const updatedTask: Task = {
         ...task,
         status: 'running' as const,
-        assignedTo: agentName,
+        assignedTo: finalAgentName,
         leaseExpiresAt,
         assignedAt: now,
         attempts: [...task.attempts, attempt],
@@ -572,7 +608,10 @@ export class FileStorageProvider extends BaseStorageProvider {
       
       return {
         data,
-        result: updatedTask,
+        result: {
+          task: updatedTask,
+          agentName: finalAgentName
+        }
       };
     });
   }
@@ -698,136 +737,37 @@ export class FileStorageProvider extends BaseStorageProvider {
     throw new Error('Method not implemented');
   }
 
-  async createAgent(input: AgentCreateInput): Promise<Agent> {
-    return this.withProjectLock(input.projectId, async (data) => {
+  // Lease-based agent operations (agents are ephemeral queue workers)
+
+  async listActiveAgents(projectId: string): Promise<AgentStatus[]> {
+    this.ensureInitialized();
+    
+    try {
+      const data = await this.readProjectData(projectId);
       const now = new Date();
-      const agent: Agent = {
-        id: uuidv4(),
-        name: input.name || `agent-${Date.now()}`,
-        projectId: input.projectId,
-        status: 'idle',
-        apiKeyHash: input.apiKeyHash || '',
-        capabilities: input.capabilities || [],
-        createdAt: now,
-        lastSeen: now,
-      };
-
-      data.agents.push(agent);
       
-      return {
-        data,
-        result: agent,
-      };
-    });
-  }
-
-  async getAgent(agentId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    const projectFiles = await listFiles(path.join(this.dataDir, 'projects'), '.json');
-    
-    for (const filePath of projectFiles) {
-      try {
-        const content = await readFileSafe(filePath);
-        if (content) {
-          const data: ProjectData = this.deserializeDates(JSON.parse(content));
-          const agent = data.agents.find(a => a.id === agentId);
-          if (agent) {
-            return agent;
-          }
-        }
-      } catch (error) {
-        // Skip corrupted files
-      }
-    }
-    
-    return null;
-  }
-
-  async getAgentByName(agentName: string, projectId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    try {
-      const data = await this.readProjectData(projectId);
-      return data.agents.find(a => a.name === agentName) || null;
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async getAgentByApiKey(hashedApiKey: string, projectId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    try {
-      const data = await this.readProjectData(projectId);
-      return data.agents.find(a => a.apiKeyHash === hashedApiKey) || null;
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async updateAgent(agentId: string, input: AgentUpdateInput): Promise<Agent> {
-    this.ensureInitialized();
-    
-    // Find which project contains this agent
-    const projectFiles = await listFiles(path.join(this.dataDir, 'projects'), '.json');
-    
-    for (const filePath of projectFiles) {
-      try {
-        const content = await readFileSafe(filePath);
-        if (content) {
-          const data: ProjectData = this.deserializeDates(JSON.parse(content));
-          const agentIndex = data.agents.findIndex(a => a.id === agentId);
-          
-          if (agentIndex >= 0) {
-            const projectId = data.project.id;
-            
-            return this.withProjectLock(projectId, async (lockedData) => {
-              const currentAgent = lockedData.agents[agentIndex];
-              if (!currentAgent) {
-                throw new Error(`Agent not found in project data`);
-              }
-              
-              const updatedAgent: Agent = {
-                ...currentAgent,
-                ...input,
-                id: currentAgent.id, // Ensure ID is preserved
-                projectId: currentAgent.projectId,
-                name: input.name || currentAgent.name,
-                status: input.status || currentAgent.status,
-                lastSeen: input.lastSeen || currentAgent.lastSeen,
-                createdAt: currentAgent.createdAt,
-              };
-              
-              lockedData.agents[agentIndex] = updatedAgent;
-              
-              return {
-                data: lockedData,
-                result: updatedAgent,
-              };
+      // Find all tasks currently assigned to agents with active leases
+      const activeAgents: AgentStatus[] = [];
+      const agentMap = new Map<string, AgentStatus>();
+      
+      for (const task of data.tasks) {
+        if (task.status === 'running' && task.assignedTo && task.leaseExpiresAt && task.leaseExpiresAt > now) {
+          if (!agentMap.has(task.assignedTo)) {
+            agentMap.set(task.assignedTo, {
+              name: task.assignedTo,
+              projectId: projectId,
+              status: 'working',
+              currentTaskId: task.id,
+              assignedAt: task.assignedAt || new Date(),
+              leaseExpiresAt: task.leaseExpiresAt
             });
           }
         }
-      } catch (error) {
-        // Skip corrupted files
       }
-    }
-    
-    throw new Error(`Agent ${agentId} not found`);
-  }
-
-  async listAgents(projectId: string): Promise<Agent[]> {
-    this.ensureInitialized();
-    
-    try {
-      const data = await this.readProjectData(projectId);
-      return data.agents.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      
+      return Array.from(agentMap.values()).sort((a, b) => 
+        (a.assignedAt?.getTime() || 0) - (b.assignedAt?.getTime() || 0)
+      );
     } catch (error: any) {
       if (error.message.includes('not found')) {
         return [];
@@ -836,39 +776,44 @@ export class FileStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async deleteAgent(agentId: string): Promise<void> {
+  async getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null> {
     this.ensureInitialized();
     
-    // Find which project contains this agent
-    const projectFiles = await listFiles(path.join(this.dataDir, 'projects'), '.json');
-    
-    for (const filePath of projectFiles) {
-      try {
-        const content = await readFileSafe(filePath);
-        if (content) {
-          const data: ProjectData = this.deserializeDates(JSON.parse(content));
-          const agentIndex = data.agents.findIndex(a => a.id === agentId);
-          
-          if (agentIndex >= 0) {
-            const projectId = data.project.id;
-            
-            await this.withProjectLock(projectId, async (lockedData) => {
-              lockedData.agents.splice(agentIndex, 1);
-              return { data: lockedData, result: undefined };
-            });
-            
-            return;
-          }
-        }
-      } catch (error) {
-        // Skip corrupted files
+    try {
+      const data = await this.readProjectData(projectId);
+      const now = new Date();
+      
+      // Find the task currently assigned to this agent
+      const activeTask = data.tasks.find(t => 
+        t.status === 'running' && 
+        t.assignedTo === agentName && 
+        t.leaseExpiresAt && 
+        t.leaseExpiresAt > now
+      );
+      
+      if (!activeTask) {
+        return null; // Agent has no active lease
       }
+      
+      return {
+        name: agentName,
+        projectId: projectId,
+        status: 'working',
+        currentTaskId: activeTask.id,
+        assignedAt: activeTask.assignedAt || new Date(),
+        leaseExpiresAt: activeTask.leaseExpiresAt
+      };
+    } catch (error: any) {
+      if (error.message.includes('not found')) {
+        return null;
+      }
+      throw error;
     }
-    
-    throw new Error(`Agent ${agentId} not found`);
   }
 
-  async completeTask(taskId: string, result: TaskResult): Promise<void> {
+  // REMOVED DUPLICATE: extendLease implementation moved to line 1015
+
+  async completeTask(taskId: string, agentName: string, result: TaskResult): Promise<void> {
     this.ensureInitialized();
     
     // Find which project contains this task
@@ -888,6 +833,15 @@ export class FileStorageProvider extends BaseStorageProvider {
               const task = lockedData.tasks[taskIndex];
               if (!task) {
                 throw new Error(`Task ${taskId} not found in project data`);
+              }
+              
+              // Validate agent assignment
+              if (task.assignedTo !== agentName) {
+                throw new Error(`Task ${taskId} is not assigned to agent ${agentName}`);
+              }
+
+              if (task.status !== 'running') {
+                throw new Error(`Task ${taskId} is not in running state`);
               }
               
               const now = new Date();
@@ -926,7 +880,7 @@ export class FileStorageProvider extends BaseStorageProvider {
     throw new Error(`Task ${taskId} not found`);
   }
 
-  async failTask(taskId: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
+  async failTask(taskId: string, agentName: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
     this.ensureInitialized();
     
     // Find which project contains this task
@@ -946,6 +900,15 @@ export class FileStorageProvider extends BaseStorageProvider {
               const task = lockedData.tasks[taskIndex];
               if (!task) {
                 throw new Error(`Task ${taskId} not found in project data`);
+              }
+              
+              // Validate agent assignment
+              if (task.assignedTo !== agentName) {
+                throw new Error(`Task ${taskId} is not assigned to agent ${agentName}`);
+              }
+
+              if (task.status !== 'running') {
+                throw new Error(`Task ${taskId} is not in running state`);
               }
               
               const now = new Date();

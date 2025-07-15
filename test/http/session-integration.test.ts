@@ -81,11 +81,12 @@ describe('Session Integration Tests', () => {
       description: 'Project for integration testing'
     });
 
-    testAgent = await storage.createAgent({
-      projectId: testProject.id,
+    // In the ephemeral agent model, agents don't need to be created
+    // They exist only when they have active task leases
+    testAgent = {
       name: 'integration-test-agent',
-      capabilities: ['test', 'integration']
-    });
+      projectId: testProject.id
+    };
     
     await storage.close();
   });
@@ -387,11 +388,11 @@ describe('Session Integration Tests', () => {
       const storage = new FileStorageProvider(TEST_DATA_DIR);
       await storage.initialize();
       
-      const testAgent2 = await storage.createAgent({
-        projectId: testProject.id,
+      // In the ephemeral agent model, agents don't need to be created
+      const testAgent2 = {
         name: 'integration-test-agent-2',
-        capabilities: ['test']
-      });
+        projectId: testProject.id
+      };
       
       await storage.close();
 

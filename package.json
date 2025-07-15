@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "bun run src/index.ts",
-    "start": "node dist/index.js",
+    "start": "bun dist/index.js",
     "mcp": "bun run src/mcp.ts",
     "http": "bun run src/http.ts",
     "cli": "bun run src/cli.ts",
@@ -22,7 +22,7 @@
     "test:working": "bun test test/config/ test/storage/ test/services/LeaseService.test.ts test/services/SessionService.test.ts test/services/ProjectService.test.ts test/services/TaskTypeService.test.ts test/mcp/ && ./test/e2e/cli-workflow.sh",
     "test:unit": "bun test test/utils/ test/config/ test/services/ test/storage/",
     "test:integration": "bun test test/integration/",
-    "test:mcp": "bun test test/mcp/",
+    "test:mcp": "bun test test/mcp/ test/integration/mcp-comprehensive.test.ts",
     "test:http": "./test/http/run-http-tests.sh",
     "test:cli": "./test/e2e/cli-workflow.sh",
     "test:e2e": "./test/e2e/run-all-tests.sh"

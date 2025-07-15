@@ -358,65 +358,40 @@ Authorization: Bearer your-token-here
 
 ## Agent Management
 
-### List Agents
+**Important**: Agents are now ephemeral queue workers, not persistent entities. They don't need registration - agents just use their names to get tasks from the queue and for reconnection after disconnects.
+
+### List Active Agents
+
+List agents currently working on tasks (agents with active task leases).
 
 ```http
 GET /api/projects/{projectId}/agents
 Authorization: Bearer your-token-here
 ```
 
-### Create Agent
-
-```http
-POST /api/projects/{projectId}/agents
-Authorization: Bearer your-token-here
-Content-Type: application/json
-
+**Response:**
+```json
 {
-  "name": "security-analysis-agent",
-  "capabilities": ["security-analysis", "code-review", "vulnerability-scanning"]
+  "success": true,
+  "data": [
+    {
+      "agentName": "security-analysis-agent",
+      "taskId": "770e8400-e29b-41d4-a716-446655440002",
+      "assignedAt": "2024-01-01T11:00:00Z",
+      "leaseExpiresAt": "2024-01-01T11:30:00Z",
+      "status": "running"
+    }
+  ]
 }
 ```
 
-### Get Agent
+### Peek Next Task
+
+Check if tasks are available in the project queue without assigning them.
 
 ```http
-GET /api/agents/{agentId}
+GET /api/projects/{projectId}/peek-next-task
 Authorization: Bearer your-token-here
-```
-
-### Update Agent
-
-```http
-PUT /api/agents/{agentId}
-Authorization: Bearer your-token-here
-Content-Type: application/json
-
-{
-  "capabilities": ["security-analysis", "code-review", "penetration-testing"]
-}
-```
-
-### Delete Agent
-
-```http
-DELETE /api/agents/{agentId}
-Authorization: Bearer your-token-here
-```
-
-## Task Operations
-
-### Get Next Task
-
-```http
-POST /api/agents/{agentName}/next-task
-Authorization: Bearer your-token-here
-Content-Type: application/json
-
-{
-  "projectId": "550e8400-e29b-41d4-a716-446655440000",
-  "capabilities": ["security-analysis", "code-review"]
-}
 ```
 
 **Response:**
@@ -424,23 +399,67 @@ Content-Type: application/json
 {
   "success": true,
   "data": {
-    "id": "770e8400-e29b-41d4-a716-446655440002",
     "projectId": "550e8400-e29b-41d4-a716-446655440000",
-    "typeId": "660e8400-e29b-41d4-a716-446655440001",
-    "instructions": "Analyze security vulnerabilities...",
-    "variables": {
-      "repository_url": "https://github.com/company/webapp"
+    "tasksAvailable": 5
+  }
+}
+```
+
+## Task Operations
+
+### Get Next Task
+
+Get the next available task for an agent. If the agent name has an existing task lease, that task is resumed. Otherwise, a new task is assigned.
+
+```http
+POST /api/agents/{agentName}/next-task
+Authorization: Bearer your-token-here
+Content-Type: application/json
+
+{
+  "projectId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": {
+    "task": {
+      "id": "770e8400-e29b-41d4-a716-446655440002",
+      "projectId": "550e8400-e29b-41d4-a716-446655440000",
+      "typeId": "660e8400-e29b-41d4-a716-446655440001",
+      "instructions": "Analyze security vulnerabilities...",
+      "variables": {
+        "repository_url": "https://github.com/company/webapp"
+      },
+      "status": "running",
+      "assignedTo": "security-analysis-agent",
+      "assignedAt": "2024-01-01T11:00:00Z",
+      "leaseExpiresAt": "2024-01-01T11:30:00Z",
+      "createdAt": "2024-01-01T10:30:00Z"
     },
-    "status": "running",
-    "assignedTo": "security-analysis-agent",
-    "assignedAt": "2024-01-01T11:00:00Z",
-    "leaseExpiresAt": "2024-01-01T11:30:00Z",
-    "createdAt": "2024-01-01T10:30:00Z"
+    "agentName": "security-analysis-agent"
+  }
+}
+```
+
+**Response (No Tasks Available):**
+```json
+{
+  "success": false,
+  "error": "No tasks available for assignment",
+  "data": {
+    "task": null,
+    "agentName": "security-analysis-agent"
   }
 }
 ```
 
 ### Complete Task
+
+Mark a task as completed with results. This releases the task lease and makes the agent available for new work.
 
 ```http
 POST /api/tasks/{taskId}/complete
@@ -448,6 +467,7 @@ Authorization: Bearer your-token-here
 Content-Type: application/json
 
 {
+  "agentName": "security-analysis-agent",
   "result": "Security analysis completed successfully. Found 3 critical vulnerabilities.",
   "outputs": {
     "vulnerabilities_found": 8,
@@ -461,12 +481,15 @@ Content-Type: application/json
 
 ### Fail Task
 
+Mark a task as failed with error details and retry options. This releases the task lease and either requeues the task for retry or marks it permanently failed.
+
 ```http
 POST /api/tasks/{taskId}/fail
 Authorization: Bearer your-token-here
 Content-Type: application/json
 
 {
+  "agentName": "security-analysis-agent",
   "error": "Repository access denied. Authentication failed.",
   "canRetry": true
 }
@@ -691,10 +714,10 @@ class TaskDriverClient {
     return response.data.data;
   }
 
-  async getNextTask(agentName, projectId, capabilities = []) {
+  async getNextTask(agentName, projectId) {
     const response = await axios.post(
       `${this.baseURL}/agents/${agentName}/next-task`,
-      { projectId, capabilities },
+      { projectId },
       { headers: { Authorization: `Bearer ${this.token}` } }
     );
     return response.data.data;
@@ -713,7 +736,7 @@ class TaskDriverClient {
 // Usage
 const client = new TaskDriverClient();
 await client.login('my-agent', 'project-id');
-const task = await client.getNextTask('my-agent', 'project-id', ['analysis']);
+const task = await client.getNextTask('my-agent', 'project-id');
 await client.completeTask(task.id, 'Task completed successfully');
 ```
 
@@ -738,10 +761,10 @@ class TaskDriverClient:
             return data['data']
         raise Exception(data['error'])
     
-    def get_next_task(self, agent_name, project_id, capabilities=None):
+    def get_next_task(self, agent_name, project_id):
         response = requests.post(
             f'{self.base_url}/agents/{agent_name}/next-task',
-            json={'projectId': project_id, 'capabilities': capabilities or []},
+            json={'projectId': project_id},
             headers={'Authorization': f'Bearer {self.token}'}
         )
         data = response.json()
@@ -763,7 +786,7 @@ class TaskDriverClient:
 # Usage
 client = TaskDriverClient()
 client.login('my-agent', 'project-id')
-task = client.get_next_task('my-agent', 'project-id', ['analysis'])
+task = client.get_next_task('my-agent', 'project-id')
 client.complete_task(task['id'], 'Task completed successfully')
 ```
 

@@ -6,13 +6,13 @@ import {
   CallToolRequestSchema 
 } from '@modelcontextprotocol/sdk/types.js';
 import { FileStorageProvider } from '../../src/storage/FileStorageProvider.js';
-import { allTools } from '../../src/tools/index.js';
-import { ToolHandlers } from '../../src/tools/handlers.js';
+import { tools } from '../../src/tools/generated.js';
+import { GeneratedToolHandlers } from '../../src/tools/generated.js';
 import { createTestDataDir } from '../fixtures/index.js';
 
 describe('MCP Server Integration', () => {
   let storage: FileStorageProvider;
-  let toolHandlers: ToolHandlers;
+  let toolHandlers: GeneratedToolHandlers;
   let server: Server;
   let testDataDir: string;
 
@@ -20,7 +20,7 @@ describe('MCP Server Integration', () => {
     testDataDir = createTestDataDir();
     storage = new FileStorageProvider(testDataDir);
     await storage.initialize();
-    toolHandlers = new ToolHandlers(storage);
+    toolHandlers = new GeneratedToolHandlers(storage);
 
     // Create MCP server
     server = new Server(
@@ -38,13 +38,12 @@ describe('MCP Server Integration', () => {
     // Register handlers
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: allTools
+        tools: tools
       };
     });
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { params } = request;
-      return await toolHandlers.handleToolCall(params);
+      return await toolHandlers.handleToolCall(request);
     });
   });
 
@@ -58,15 +57,15 @@ describe('MCP Server Integration', () => {
   describe('Tool Registration', () => {
     it('should register all tools', async () => {
       // Test the tools list directly
-      expect(allTools).toBeDefined();
-      expect(allTools.length).toBeGreaterThan(0);
-      expect(allTools.map((t: any) => t.name)).toContain('create_project');
-      expect(allTools.map((t: any) => t.name)).toContain('create_task');
-      expect(allTools.map((t: any) => t.name)).toContain('register_agent');
+      expect(tools).toBeDefined();
+      expect(tools.length).toBeGreaterThan(0);
+      expect(tools.map((t: any) => t.name)).toContain('create_project');
+      expect(tools.map((t: any) => t.name)).toContain('create_task');
+      expect(tools.map((t: any) => t.name)).toContain('get_next_task');
     });
 
     it('should have properly structured tool definitions', () => {
-      allTools.forEach(tool => {
+      tools.forEach(tool => {
         expect(tool.name).toBeDefined();
         expect(tool.description).toBeDefined();
         expect(tool.inputSchema).toBeDefined();
@@ -79,6 +78,7 @@ describe('MCP Server Integration', () => {
   describe('Tool Execution', () => {
     it('should execute create_project tool', async () => {
       const result = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'create_project',
           arguments: {
@@ -93,11 +93,12 @@ describe('MCP Server Integration', () => {
       
       const response = JSON.parse(result.content[0].text);
       expect(response.success).toBe(true);
-      expect(response.project.name).toBe('integration-test-project');
+      expect(response.data.name).toBe('integration-test-project');
     });
 
     it('should execute health_check tool', async () => {
       const result = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'health_check',
           arguments: {}
@@ -107,7 +108,7 @@ describe('MCP Server Integration', () => {
       expect(result.content).toBeDefined();
       const response = JSON.parse(result.content[0].text);
       expect(response.success).toBe(true);
-      expect(response.status).toBe('healthy');
+      expect(response.data.status).toBe('healthy');
     });
   });
 
@@ -115,6 +116,7 @@ describe('MCP Server Integration', () => {
     it('should support complete task workflow', async () => {
       // 1. Create project
       const projectResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'create_project',
           arguments: {
@@ -125,10 +127,11 @@ describe('MCP Server Integration', () => {
       } as any);
 
       const projectResponse = JSON.parse(projectResult.content[0].text);
-      const projectId = projectResponse.project.id;
+      const projectId = projectResponse.data.id;
 
       // 2. Create task type
       const taskTypeResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'create_task_type',
           arguments: {
@@ -140,45 +143,33 @@ describe('MCP Server Integration', () => {
       } as any);
 
       const taskTypeResponse = JSON.parse(taskTypeResult.content[0].text);
-      const taskTypeId = taskTypeResponse.taskType.id;
+      const taskTypeId = taskTypeResponse.data.id;
 
       // 3. Create task
       const taskResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'create_task',
           arguments: {
             projectId,
-            typeId: taskTypeId,
+            type: taskTypeId,
             instructions: 'Process data with analysis method',
-            variables: {
+            variables: JSON.stringify({
               item: 'data',
               method: 'analysis'
-            }
+            })
           }
         }
       } as any);
 
       const taskResponse = JSON.parse(taskResult.content[0].text);
-      const taskId = taskResponse.task.id;
 
-      // 4. Register agent
-      const agentResult = await toolHandlers.handleToolCall({
-        params: {
-          name: 'register_agent',
-          arguments: {
-            projectId,
-            name: 'workflow-agent'
-          }
-        }
-      } as any);
-
-      const agentResponse = JSON.parse(agentResult.content[0].text);
-      expect(agentResponse.success).toBe(true);
-
+      // 4. Get next task (no need to register agent in lease-based model)
       // 5. Assign task
       const assignResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
-          name: 'assign_task',
+          name: 'get_next_task',
           arguments: {
             projectId,
             agentName: 'workflow-agent'
@@ -188,32 +179,40 @@ describe('MCP Server Integration', () => {
 
       const assignResponse = JSON.parse(assignResult.content[0].text);
       expect(assignResponse.success).toBe(true);
-      expect(assignResponse.task.status).toBe('running');
-      expect(assignResponse.task.assignedTo).toBe('workflow-agent');
+      expect(assignResponse.data.task.assignedTo).toBe('workflow-agent');
+      const assignedTaskId = assignResponse.data.task.id;
+      expect(assignResponse.data.task.assignedAt).toBeDefined();
+      expect(assignResponse.data.task.leaseExpiresAt).toBeDefined();
 
       // 6. Complete task
       const completeResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'complete_task',
           arguments: {
+            agentName: 'workflow-agent',
             projectId,
-            taskId,
+            taskId: assignedTaskId,
             result: 'Task completed successfully',
-            outputs: {
+            outputs: JSON.stringify({
               processed: 'data',
               method_used: 'analysis'
-            }
+            })
           }
         }
       } as any);
 
       const completeResponse = JSON.parse(completeResult.content[0].text);
+      if (!completeResponse.success) {
+        console.log('Complete task failed:', completeResponse.error);
+      }
       expect(completeResponse.success).toBe(true);
-      expect(completeResponse.task.status).toBe('completed');
-      expect(completeResponse.task.result).toBe('Task completed successfully');
+      expect(completeResponse.data.status).toBe('completed');
+      expect(completeResponse.data.result).toBe('Task completed successfully');
 
       // 7. Verify project stats
       const statsResult = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'get_project_stats',
           arguments: {
@@ -224,14 +223,15 @@ describe('MCP Server Integration', () => {
 
       const statsResponse = JSON.parse(statsResult.content[0].text);
       expect(statsResponse.success).toBe(true);
-      expect(statsResponse.stats.totalTasks).toBe(1);
-      expect(statsResponse.stats.completedTasks).toBe(1);
+      expect(statsResponse.data.stats.project.stats.totalTasks).toBe(1);
+      expect(statsResponse.data.stats.project.stats.completedTasks).toBe(1);
     });
   });
 
   describe('Error Handling', () => {
     it('should handle tool call errors gracefully', async () => {
       const result = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'unknown_tool',
           arguments: {}
@@ -239,11 +239,12 @@ describe('MCP Server Integration', () => {
       } as any);
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('Error');
+      expect(result.content[0].text).toContain('Unknown tool');
     });
 
     it('should handle validation errors', async () => {
       const result = await toolHandlers.handleToolCall({
+        method: 'tools/call',
         params: {
           name: 'create_project',
           arguments: {
@@ -254,7 +255,7 @@ describe('MCP Server Integration', () => {
       } as any);
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('Validation Error');
+      expect(result.content[0].text).toContain('Validation failed');
     });
   });
 });

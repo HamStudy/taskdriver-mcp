@@ -1,5 +1,8 @@
 /**
  * Agent Management Commands
+ * 
+ * Note: Agents are now ephemeral queue workers, not persistent entities.
+ * Most traditional "agent management" is unnecessary - agents just get tasks from the queue.
  */
 
 import { CommandDefinition } from '../types.js';
@@ -9,8 +12,8 @@ import {
   parseJsonSafely 
 } from '../utils.js';
 
-// Register Agent Command
-const registerAgentParams = [
+// Get Next Task Command (replaces the old assign_task)
+const getNextTaskParams = [
   {
     name: 'projectId',
     type: 'string',
@@ -18,137 +21,21 @@ const registerAgentParams = [
     required: true,
     positional: true
   },
-  {
-    name: 'name',
-    type: 'string',
-    description: 'Agent name',
-    required: true,
-    positional: true
-  },
-  {
-    name: 'capabilities',
-    type: 'array',
-    description: 'Agent capabilities (space-separated)',
-    alias: ['caps', 'c'],
-    default: []
-  }
-] as const;
-
-export const registerAgent: CommandDefinition<typeof registerAgentParams> = {
-  name: 'registerAgent',
-  mcpName: 'register_agent',
-  cliName: 'register-agent',
-  description: 'Register a new agent',
-  parameters: registerAgentParams,
-  async handler(context, args) {
-    // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
-    if (!project) {
-      return {
-        success: false,
-        error: `Project '${args.projectId}' not found`
-      };
-    }
-
-    const result = await context.agent.registerAgent({
-      projectId: project.id,
-      name: args.name,
-      capabilities: args.capabilities
-    });
-
-    return {
-      success: true,
-      data: {
-        id: result.agent.id,
-        name: result.agent.name,
-        projectId: result.agent.projectId,
-        capabilities: result.agent.capabilities,
-        status: result.agent.status,
-        createdAt: result.agent.createdAt,
-        apiKey: result.apiKey
-      },
-      message: 'Agent registered successfully'
-    };
-  }
-};
-
-// List Agents Command
-const listAgentsParams = [
-  {
-    name: 'projectId',
-    type: 'string',
-    description: 'Project ID or name',
-    required: true,
-    positional: true
-  }
-] as const;
-
-export const listAgents: CommandDefinition<typeof listAgentsParams> = {
-  name: 'listAgents',
-  mcpName: 'list_agents',
-  cliName: 'list-agents',
-  description: 'List agents for a project',
-  parameters: listAgentsParams,
-  async handler(context, args) {
-    // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
-    if (!project) {
-      return {
-        success: false,
-        error: `Project '${args.projectId}' not found`
-      };
-    }
-
-    const agents = await context.agent.listAgents(project.id);
-
-    return {
-      success: true,
-      data: agents.map(a => ({
-        id: a.id,
-        name: a.name,
-        projectId: a.projectId,
-        capabilities: a.capabilities,
-        status: a.status,
-        lastSeen: a.lastSeen,
-        createdAt: a.createdAt
-      }))
-    };
-  }
-};
-
-// Assign Task (Get Next Task) Command
-const assignTaskParams = [
   {
     name: 'agentName',
     type: 'string',
-    description: 'Agent name',
-    required: true,
+    description: 'Agent name (optional - will be auto-generated if not provided)',
+    required: false,
     positional: true
-  },
-  {
-    name: 'projectId',
-    type: 'string',
-    description: 'Project ID or name',
-    required: true,
-    positional: true
-  },
-  {
-    name: 'capabilities',
-    type: 'array',
-    description: 'Agent capabilities (space-separated)',
-    alias: ['caps', 'c'],
-    default: []
   }
 ] as const;
 
-export const assignTask: CommandDefinition<typeof assignTaskParams> = {
-  name: 'assignTask',
-  mcpName: 'assign_task',
+export const getNextTask: CommandDefinition<typeof getNextTaskParams> = {
+  name: 'getNextTask',
+  mcpName: 'get_next_task',
   cliName: 'get-next-task',
-  description: 'Get next task for agent (assign task)',
-  parameters: assignTaskParams,
+  description: 'Get the next available task from the project queue. If agentName is provided and has an existing task lease, that task is resumed. Otherwise assigns a new task. Agent names are only used for reconnection after disconnects.',
+  parameters: getNextTaskParams,
   async handler(context, args) {
     // Find project
     const projects = await context.project.listProjects(true);
@@ -160,35 +47,83 @@ export const assignTask: CommandDefinition<typeof assignTaskParams> = {
       };
     }
 
-    const task = await context.agent.getNextTask(args.agentName, project.id);
+    const result = await context.agent.getNextTask(project.id, args.agentName);
 
-    if (!task) {
+    if (!result.task) {
       return {
-        success: true,
-        data: null,
-        message: 'No tasks available for assignment'
+        success: false,
+        data: {
+          task: null,
+          agentName: result.agentName
+        },
+        error: 'No tasks available for assignment'
       };
     }
 
     // Get full instructions for the assigned task
-    const instructions = await context.task.getTaskInstructions(task.id);
+    const instructions = await context.task.getTaskInstructions(result.task.id);
 
     return {
       success: true,
       data: {
         task: {
-          id: task.id,
-          projectId: task.projectId,
-          typeId: task.typeId,
+          id: result.task.id,
+          projectId: result.task.projectId,
+          typeId: result.task.typeId,
           instructions: instructions,
-          assignedTo: task.assignedTo,
-          assignedAt: task.assignedAt,
-          leaseExpiresAt: task.leaseExpiresAt,
-          variables: task.variables,
-          retryCount: task.retryCount
-        }
+          assignedTo: result.task.assignedTo,
+          assignedAt: result.task.assignedAt,
+          leaseExpiresAt: result.task.leaseExpiresAt,
+          variables: result.task.variables,
+          retryCount: result.task.retryCount
+        },
+        agentName: result.agentName
       },
       message: 'Task assigned successfully'
+    };
+  }
+};
+
+// List Active Agents Command (for monitoring - shows agents with active leases)
+const listActiveAgentsParams = [
+  {
+    name: 'projectId',
+    type: 'string',
+    description: 'Project ID or name',
+    required: true,
+    positional: true
+  }
+] as const;
+
+export const listActiveAgents: CommandDefinition<typeof listActiveAgentsParams> = {
+  name: 'listActiveAgents',
+  mcpName: 'list_active_agents',
+  cliName: 'list-active-agents',
+  description: 'List agents currently working on tasks (agents with active task leases). This is for monitoring purposes - agents are ephemeral and only appear here when actively working.',
+  parameters: listActiveAgentsParams,
+  async handler(context, args) {
+    // Find project
+    const projects = await context.project.listProjects(true);
+    const project = findProjectByNameOrId(projects, args.projectId);
+    if (!project) {
+      return {
+        success: false,
+        error: `Project '${args.projectId}' not found`
+      };
+    }
+
+    const agents = await context.agent.listActiveAgents(project.id);
+
+    return {
+      success: true,
+      data: agents.map(a => ({
+        name: a.name,
+        projectId: a.projectId,
+        status: a.status,
+        currentTaskId: a.currentTaskId,
+        assignedAt: a.assignedAt,
+        leaseExpiresAt: a.leaseExpiresAt
+      }))
     };
   }
 };
@@ -235,7 +170,7 @@ export const completeTask: CommandDefinition<typeof completeTaskParams> = {
   name: 'completeTask',
   mcpName: 'complete_task',
   cliName: 'complete-task',
-  description: 'Complete a task',
+  description: 'Mark a task as completed with results and optional structured outputs. This releases the task lease and makes the agent available for new work.',
   parameters: completeTaskParams,
   async handler(context, args) {
     // Find project
@@ -256,8 +191,8 @@ export const completeTask: CommandDefinition<typeof completeTaskParams> = {
 
     const taskResult = {
       success: true,
-      result: resultContent,
-      outputs
+      output: resultContent,
+      metadata: outputs
     };
 
     await context.agent.completeTask(args.agentName, project.id, args.taskId, taskResult);
@@ -321,7 +256,7 @@ export const failTask: CommandDefinition<typeof failTaskParams> = {
   name: 'failTask',
   mcpName: 'fail_task',
   cliName: 'fail-task',
-  description: 'Fail a task',
+  description: 'Mark a task as failed with error details and retry options. This releases the task lease and either requeues the task for retry or marks it permanently failed.',
   parameters: failTaskParams,
   async handler(context, args) {
     // Find project
@@ -354,6 +289,110 @@ export const failTask: CommandDefinition<typeof failTaskParams> = {
         canRetry: args.canRetry
       },
       message: 'Task marked as failed'
+    };
+  }
+};
+
+// Extend Lease Command (for long-running tasks)
+const extendLeaseParams = [
+  {
+    name: 'agentName',
+    type: 'string',
+    description: 'Agent name',
+    required: true,
+    positional: true
+  },
+  {
+    name: 'taskId',
+    type: 'string',
+    description: 'Task ID',
+    required: true,
+    positional: true
+  },
+  {
+    name: 'minutes',
+    type: 'number',
+    description: 'Additional minutes to extend the lease',
+    required: true,
+    positional: true
+  }
+] as const;
+
+export const extendLease: CommandDefinition<typeof extendLeaseParams> = {
+  name: 'extendLease',
+  mcpName: 'extend_task_lease',
+  cliName: 'extend-lease',
+  description: 'Extend the lease on a running task by additional minutes. Use this for long-running operations to prevent the task from being reassigned to other agents.',
+  parameters: extendLeaseParams,
+  async handler(context, args) {
+    await context.agent.extendTaskLease(args.taskId, args.agentName, args.minutes);
+
+    // Get the updated task to return the new lease expiry
+    const updatedTask = await context.task.getTask(args.taskId);
+
+    return {
+      success: true,
+      data: {
+        taskId: args.taskId,
+        agentName: args.agentName,
+        leaseExpiresAt: updatedTask?.leaseExpiresAt,
+        extendedBy: args.minutes
+      },
+      message: `Task lease extended by ${args.minutes} minutes`
+    };
+  }
+};
+
+// Peek Next Task Command (for scripting - check if tasks available without assigning)
+const peekNextTaskParams = [
+  {
+    name: 'projectId',
+    type: 'string',
+    description: 'Project ID or name',
+    required: true,
+    positional: true
+  }
+] as const;
+
+export const peekNextTask: CommandDefinition<typeof peekNextTaskParams> = {
+  name: 'peekNextTask',
+  mcpName: 'peek_next_task',
+  cliName: 'peek-next-task',
+  description: 'Check if tasks are available in the project queue without assigning them. Returns success if tasks are available, error if queue is empty. Perfect for bash scripts: "while peek-next-task project; do launch_agent; done"',
+  parameters: peekNextTaskParams,
+  async handler(context, args) {
+    // Find project
+    const projects = await context.project.listProjects(true);
+    const project = findProjectByNameOrId(projects, args.projectId);
+    if (!project) {
+      return {
+        success: false,
+        error: `Project '${args.projectId}' not found`
+      };
+    }
+
+    // Check if any tasks are available (queued status)
+    const tasks = await context.task.listTasks(project.id, { status: 'queued' });
+    const availableCount = tasks.length;
+
+    if (availableCount === 0) {
+      return {
+        success: false,
+        data: {
+          projectId: project.id,
+          tasksAvailable: 0
+        },
+        error: 'No tasks available in queue'
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        projectId: project.id,
+        tasksAvailable: availableCount
+      },
+      message: `${availableCount} task${availableCount === 1 ? '' : 's'} available in queue`
     };
   }
 };

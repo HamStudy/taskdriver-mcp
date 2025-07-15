@@ -55,22 +55,16 @@ taskdriver create-task-type "code-analysis" "quality-review" \
   --duplicate-handling "ignore"
 ```
 
-## Step 3: Register Agents
+## Step 3: Prepare Agents
 
-Register agents with appropriate capabilities:
+In the new lease-based model, agents don't need registration - they're ephemeral queue workers that just use their names:
 
 ```bash
-# Security specialist agent
-taskdriver register-agent "code-analysis" "security-agent" \
-  --capabilities "security-analysis" "vulnerability-scanning" "penetration-testing"
-
-# Performance specialist agent
-taskdriver register-agent "code-analysis" "performance-agent" \
-  --capabilities "performance-analysis" "load-testing" "optimization"
-
-# General code quality agent
-taskdriver register-agent "code-analysis" "quality-agent" \
-  --capabilities "code-review" "static-analysis" "best-practices"
+# Agent names are just identifiers used for task assignment and reconnection
+# No registration needed - agents can start working immediately
+SECURITY_AGENT="security-agent"
+PERFORMANCE_AGENT="performance-agent"
+QUALITY_AGENT="quality-agent"
 ```
 
 ## Step 4: Create Tasks
@@ -81,13 +75,13 @@ Now create specific tasks using the templates:
 
 ```bash
 # Security scan for authentication module
-taskdriver create-task "code-analysis" "security-scan-task-type-id" \
+taskdriver create-task "code-analysis" -t "security-scan" \
   "Security analysis for authentication system" \
   --variables '{"repository_url": "https://github.com/company/webapp", "security_aspects": "authentication,authorization,input-validation,session-management"}' \
   --batch-id "security-audit-2024-q1"
 
 # Security scan for API endpoints
-taskdriver create-task "code-analysis" "security-scan-task-type-id" \
+taskdriver create-task "code-analysis" -t "security-scan" \
   "Security analysis for API endpoints" \
   --variables '{"repository_url": "https://github.com/company/api", "security_aspects": "api-security,rate-limiting,data-validation,cors"}' \
   --batch-id "security-audit-2024-q1"
@@ -97,13 +91,13 @@ taskdriver create-task "code-analysis" "security-scan-task-type-id" \
 
 ```bash
 # Database performance analysis
-taskdriver create-task "code-analysis" "performance-analysis-task-type-id" \
+taskdriver create-task "code-analysis" -t "performance-analysis" \
   "Performance analysis for database layer" \
   --variables '{"repository_url": "https://github.com/company/webapp", "component": "database", "performance_metrics": "query-performance,connection-pooling,indexing"}' \
   --batch-id "performance-review-2024-q1"
 
 # Frontend performance analysis
-taskdriver create-task "code-analysis" "performance-analysis-task-type-id" \
+taskdriver create-task "code-analysis" -t "performance-analysis" \
   "Performance analysis for frontend" \
   --variables '{"repository_url": "https://github.com/company/frontend", "component": "frontend", "performance_metrics": "load-time,bundle-size,rendering-performance"}' \
   --batch-id "performance-review-2024-q1"
@@ -113,13 +107,13 @@ taskdriver create-task "code-analysis" "performance-analysis-task-type-id" \
 
 ```bash
 # Python code quality review
-taskdriver create-task "code-analysis" "quality-review-task-type-id" \
+taskdriver create-task "code-analysis" -t "quality-review" \
   "Code quality review for Python backend" \
   --variables '{"repository_url": "https://github.com/company/backend", "language": "python", "quality_aspects": "code-style,documentation,testing,maintainability"}' \
   --batch-id "quality-review-2024-q1"
 
 # JavaScript code quality review
-taskdriver create-task "code-analysis" "quality-review-task-type-id" \
+taskdriver create-task "code-analysis" -t "quality-review" \
   "Code quality review for JavaScript frontend" \
   --variables '{"repository_url": "https://github.com/company/frontend", "language": "javascript", "quality_aspects": "es6-standards,error-handling,performance,accessibility"}' \
   --batch-id "quality-review-2024-q1"
@@ -133,11 +127,10 @@ Agents can now pick up and execute tasks:
 
 ```bash
 # Get next task
-taskdriver get-next-task "security-agent" "code-analysis"
+taskdriver get-next-task "code-analysis" "security-agent"
 
 # Complete the task (example)
-taskdriver complete-task "security-agent" "code-analysis" "task-id-here" \
-  --result '{
+taskdriver complete-task "security-agent" "code-analysis" "task-id-here" '{
     "status": "completed",
     "summary": "Security analysis completed for authentication system",
     "vulnerabilities_found": 3,
@@ -155,11 +148,10 @@ taskdriver complete-task "security-agent" "code-analysis" "task-id-here" \
 
 ```bash
 # Get next task
-taskdriver get-next-task "performance-agent" "code-analysis"
+taskdriver get-next-task "code-analysis" "performance-agent"
 
 # Complete the task (example)
-taskdriver complete-task "performance-agent" "code-analysis" "task-id-here" \
-  --result '{
+taskdriver complete-task "performance-agent" "code-analysis" "task-id-here" '{
     "status": "completed",
     "summary": "Performance analysis completed for database layer",
     "performance_score": 7.5,
@@ -181,11 +173,10 @@ taskdriver complete-task "performance-agent" "code-analysis" "task-id-here" \
 
 ```bash
 # Get next task
-taskdriver get-next-task "quality-agent" "code-analysis"
+taskdriver get-next-task "code-analysis" "quality-agent"
 
 # Complete the task (example)
-taskdriver complete-task "quality-agent" "code-analysis" "task-id-here" \
-  --result '{
+taskdriver complete-task "quality-agent" "code-analysis" "task-id-here" '{
     "status": "completed",
     "summary": "Code quality review completed for Python backend",
     "quality_score": 8.2,
@@ -231,13 +222,7 @@ If tasks fail, they can be retried:
 
 ```bash
 # If a task fails, the agent should report it
-taskdriver fail-task "security-agent" "code-analysis" "failed-task-id" \
-  --result '{
-    "status": "failed",
-    "error": "Repository access denied - authentication failed",
-    "retryable": true,
-    "troubleshooting": "Check repository permissions and access tokens"
-  }'
+taskdriver fail-task "security-agent" "code-analysis" "failed-task-id" "Repository access denied - authentication failed" --can-retry
 
 # Failed tasks with remaining retries will be automatically queued again
 # You can monitor failed tasks
@@ -250,7 +235,7 @@ After running this workflow, you should have:
 
 1. **Project Structure**: A well-organized project with clear instructions
 2. **Task Types**: Reusable templates for different analysis types
-3. **Specialized Agents**: Agents with specific capabilities for different analysis areas
+3. **Ephemeral Agents**: Agents working as queue workers without persistent registration
 4. **Batch Organization**: Tasks grouped by analysis type and time period
 5. **Comprehensive Results**: Detailed analysis reports with actionable recommendations
 

@@ -101,11 +101,8 @@ export class ProjectService {
       throw new Error(`Project ${projectId} not found`);
     }
 
-    const agents = await this.storage.listAgents(projectId);
-    const activeAgents = agents.filter(agent => 
-      agent.status === 'working' || 
-      (Date.now() - agent.lastSeen.getTime()) < 5 * 60 * 1000 // Active within 5 minutes
-    ).length;
+    const activeAgentStatuses = await this.storage.listActiveAgents(projectId);
+    const activeAgents = activeAgentStatuses.length;
 
     // Calculate recent activity (would need more sophisticated queries in real implementation)
     const recentActivity = {

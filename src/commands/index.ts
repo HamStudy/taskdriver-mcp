@@ -27,9 +27,9 @@ import {
 } from './definitions/task.js';
 
 import {
-  registerAgent,
-  listAgents,
-  assignTask,
+  getNextTask,
+  peekNextTask,
+  listActiveAgents,
   completeTask,
   failTask
 } from './definitions/agent.js';
@@ -61,10 +61,10 @@ export const COMMAND_DEFINITIONS: CommandDefinition<any>[] = [
   listTasks,
   getTask,
   
-  // Agent Management & Task Execution
-  registerAgent,
-  listAgents,
-  assignTask,
+  // Task Execution (Lease-based Queue Workers)
+  getNextTask,
+  peekNextTask,
+  listActiveAgents,
   completeTask,
   failTask,
   
@@ -95,10 +95,10 @@ export {
   listTasks,
   getTask,
   
-  // Agent Management & Task Execution
-  registerAgent,
-  listAgents,
-  assignTask,
+  // Task Execution (Lease-based Queue Workers)
+  getNextTask,
+  peekNextTask,
+  listActiveAgents,
   completeTask,
   failTask,
   

@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { 
   AuthenticatedRequest,
   Session,
-  Agent,
   Project,
   ApiResponse
 } from './types/index.js';
@@ -30,7 +29,6 @@ declare global {
   namespace Express {
     interface Request {
       session?: Session;
-      agent?: Agent;
       project?: Project;
       correlationId?: string;
     }
@@ -401,13 +399,13 @@ export class TaskDriverHttpServer {
 
       // Attach session info to request
       req.session = sessionInfo.session;
-      req.agent = sessionInfo.agent;
       req.project = sessionInfo.project;
+      // Note: agent info is available in sessionInfo.agent but not attached to req in lease-based model
 
       logger.debug('Authentication successful', {
         correlationId: req.correlationId,
         sessionId: sessionInfo.session.id,
-        agentName: sessionInfo.agent.name,
+        agentName: sessionInfo.agent?.name || sessionInfo.session.agentName,
         projectId: sessionInfo.project.id
       });
 
@@ -745,7 +743,7 @@ export class TaskDriverHttpServer {
   private async handleListAgents(req: Request, res: Response): Promise<void> {
     try {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
-      const agents = await this.services!.agent.listAgents(projectId);
+      const agents = await this.services!.agent.listActiveAgents(projectId);
       this.sendSuccess(res, agents);
     } catch (error: any) {
       this.sendError(res, error.message);
@@ -753,23 +751,18 @@ export class TaskDriverHttpServer {
   }
 
   private async handleCreateAgent(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.services!.agent.registerAgent({
-        ...req.body,
-        projectId: req.params.projectId
-      });
-      this.sendSuccess(res, result, 201);
-    } catch (error: any) {
-      this.sendError(res, error.message);
-    }
+    // In lease-based model, agents don't need registration
+    // This endpoint is deprecated but kept for API compatibility
+    this.sendError(res, 'Agent registration not supported in lease-based model. Agents are created automatically when they request tasks.', 410);
   }
 
   private async handleGetAgent(req: Request, res: Response): Promise<void> {
     try {
-      const agentId = this.validateRequiredParam(req.params.agentId, 'Agent ID');
-      const agent = await this.services!.agent.getAgent(agentId);
+      const agentName = this.validateRequiredParam(req.params.agentId, 'Agent Name');
+      const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
+      const agent = await this.services!.agent.getAgentStatus(agentName, projectId);
       if (!agent) {
-        this.sendError(res, 'Agent not found', 404);
+        this.sendError(res, 'Agent not found or not currently active', 404);
         return;
       }
       this.sendSuccess(res, agent);
@@ -779,23 +772,13 @@ export class TaskDriverHttpServer {
   }
 
   private async handleUpdateAgent(req: Request, res: Response): Promise<void> {
-    try {
-      const agentId = this.validateRequiredParam(req.params.agentId, 'Agent ID');
-      const agent = await this.services!.agent.updateAgent(agentId, req.body);
-      this.sendSuccess(res, agent);
-    } catch (error: any) {
-      this.sendError(res, error.message);
-    }
+    // In lease-based model, agent state is not persistent/updatable
+    this.sendError(res, 'Agent updates not supported in lease-based model. Agent state is managed through task leases.', 410);
   }
 
   private async handleDeleteAgent(req: Request, res: Response): Promise<void> {
-    try {
-      const agentId = this.validateRequiredParam(req.params.agentId, 'Agent ID');
-      await this.services!.agent.deleteAgent(agentId);
-      this.sendSuccess(res, { message: 'Agent deleted successfully' });
-    } catch (error: any) {
-      this.sendError(res, error.message);
-    }
+    // In lease-based model, agents don't exist persistently to delete
+    this.sendError(res, 'Agent deletion not supported in lease-based model. Agents are ephemeral.', 410);
   }
 
   private async handleGetNextTask(req: Request, res: Response): Promise<void> {
@@ -851,10 +834,16 @@ export class TaskDriverHttpServer {
   }
 
   private async handleGetSession(req: Request, res: Response): Promise<void> {
+    // In the ephemeral agent model, we construct agent info from session data
+    const agentInfo = req.session?.agentName ? {
+      name: req.session.agentName,
+      // Note: Other agent properties are not available in ephemeral model
+    } : null;
+
     this.sendSuccess(res, {
       session: req.session,
-      agent: req.agent,
-      project: req.project
+      project: req.project,
+      agent: agentInfo
     });
   }
 

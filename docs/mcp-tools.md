@@ -4,7 +4,7 @@ Complete reference for TaskDriver's Model Context Protocol (MCP) tools.
 
 ## Overview
 
-TaskDriver provides 19 MCP tools for complete task management and orchestration. These tools enable LLM agents to create projects, manage tasks, coordinate with other agents, and monitor system health.
+TaskDriver provides 21 MCP tools for complete task management and orchestration. These tools enable LLM agents to create projects, manage tasks, coordinate with other agents, and monitor system health.
 
 ## Getting Started
 
@@ -215,30 +215,52 @@ Get detailed information about a specific task.
 
 ## Agent Management Tools
 
-### register_agent
+**Important**: Agents are now ephemeral queue workers, not persistent entities. They don't need registration - agents just get tasks from the queue using their name. Agent names are only used for reconnection after disconnects.
 
-Register a new agent for task execution.
+### get_next_task
+
+Get the next available task from the project queue. If the agent name has an existing task lease, that task is resumed. Otherwise, a new task is assigned. Before starting any task, agents should first get project instructions using get_project.
 
 **Parameters:**
-- `projectId` (required) - Project ID (UUID)
-- `name` (optional) - Agent name (will be auto-generated if not provided)
-- `capabilities` (optional) - Array of capabilities or task types this agent can handle
+- `projectId` (required) - Project ID or name
+- `agentName` (optional) - Agent name (will be auto-generated if not provided)
 
 **Example:**
 ```json
 {
   "projectId": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "security-analysis-agent",
-  "capabilities": ["security-analysis", "code-review", "vulnerability-scanning"]
+  "agentName": "security-analysis-agent"
 }
 ```
 
-### list_agents
+**Returns:**
+- On success: Task object with full instructions and lease information
+- On failure: Error indicating no tasks available (agents can handle this to stop processing)
 
-List all agents for a project.
+### peek_next_task
+
+Check if tasks are available in the project queue without assigning them. Perfect for determining if agents should be launched.
 
 **Parameters:**
-- `projectId` (required) - Project ID (UUID)
+- `projectId` (required) - Project ID or name
+
+**Example:**
+```json
+{
+  "projectId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Returns:**
+- On success: Number of tasks available
+- On failure: No tasks available in queue
+
+### list_active_agents
+
+List agents currently working on tasks (agents with active task leases). This is for monitoring purposes - agents are ephemeral and only appear here when actively working.
+
+**Parameters:**
+- `projectId` (required) - Project ID or name
 
 **Example:**
 ```json
@@ -249,37 +271,21 @@ List all agents for a project.
 
 ## Task Execution Tools
 
-### assign_task
-
-Assign a queued task to an agent for execution. Before starting any task, agents should first get project instructions using get_project.
-
-**Parameters:**
-- `projectId` (required) - Project ID (UUID)
-- `agentName` (required) - Agent name requesting task assignment
-- `capabilities` (optional) - Array of agent capabilities for task matching
-
-**Example:**
-```json
-{
-  "projectId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentName": "security-analysis-agent",
-  "capabilities": ["security-analysis", "code-review"]
-}
-```
-
 ### complete_task
 
-Mark a task as completed with results. Before starting any task, agents should first get project instructions using get_project.
+Mark a task as completed with results. This releases the task lease and makes the agent available for new work.
 
 **Parameters:**
-- `projectId` (required) - Project ID (UUID)
-- `taskId` (required) - Task ID (UUID)
-- `result` (required) - Task execution result
+- `agentName` (required) - Agent name
+- `projectId` (required) - Project ID or name
+- `taskId` (required) - Task ID
+- `result` (required) - Task execution result (string or JSON)
 - `outputs` (optional) - Structured task outputs
 
 **Example:**
 ```json
 {
+  "agentName": "security-analysis-agent",
   "projectId": "550e8400-e29b-41d4-a716-446655440000",
   "taskId": "770e8400-e29b-41d4-a716-446655440002",
   "result": "Security analysis completed successfully. Found 3 critical vulnerabilities and 5 medium-risk issues.",
@@ -295,10 +301,11 @@ Mark a task as completed with results. Before starting any task, agents should f
 
 ### fail_task
 
-Mark a task as failed with error information. Before starting any task, agents should first get project instructions using get_project.
+Mark a task as failed with error information. This releases the task lease and either requeues the task for retry or marks it permanently failed.
 
 **Parameters:**
-- `projectId` (required) - Project ID (UUID)
+- `agentName` (required) - Agent name
+- `projectId` (required) - Project ID or name
 - `taskId` (required) - Task ID (UUID)
 - `error` (required) - Error message or description
 - `canRetry` (optional) - Whether the task can be retried (default: true)
@@ -306,6 +313,7 @@ Mark a task as failed with error information. Before starting any task, agents s
 **Example:**
 ```json
 {
+  "agentName": "security-analysis-agent",
   "projectId": "550e8400-e29b-41d4-a716-446655440000",
   "taskId": "770e8400-e29b-41d4-a716-446655440002",
   "error": "Repository access denied. Authentication failed.",
@@ -400,22 +408,20 @@ Manually trigger cleanup of expired task leases for a project.
    }
    ```
 
-2. **Register Agent** (if not already registered):
+2. **Check for Available Tasks** (Optional - for scripting):
    ```json
    {
-     "tool": "register_agent",
+     "tool": "peek_next_task",
      "parameters": {
-       "projectId": "550e8400-e29b-41d4-a716-446655440000",
-       "name": "my-agent",
-       "capabilities": ["analysis", "review"]
+       "projectId": "550e8400-e29b-41d4-a716-446655440000"
      }
    }
    ```
 
-3. **Get Task Assignment**:
+3. **Get Next Task** (No agent registration needed):
    ```json
    {
-     "tool": "assign_task",
+     "tool": "get_next_task",
      "parameters": {
        "projectId": "550e8400-e29b-41d4-a716-446655440000",
        "agentName": "my-agent"
@@ -428,6 +434,7 @@ Manually trigger cleanup of expired task leases for a project.
    {
      "tool": "complete_task",
      "parameters": {
+       "agentName": "my-agent",
        "projectId": "550e8400-e29b-41d4-a716-446655440000",
        "taskId": "task-id",
        "result": "Task completed successfully"
@@ -509,8 +516,8 @@ Manually trigger cleanup of expired task leases for a project.
 ### For Agents
 
 1. **Always read project instructions first** using `get_project`
-2. **Register with appropriate capabilities** that match available task types
-3. **Handle task failures gracefully** with meaningful error messages
+2. **Use descriptive agent names** for easy identification and reconnection
+3. **Handle task failures gracefully** with meaningful error messages using `fail_task`
 4. **Extend leases** for long-running tasks using `extend_task_lease`
 5. **Provide structured outputs** in `complete_task` for better tracking
 
@@ -544,9 +551,9 @@ def create_taskdriver_tools(mcp_client):
             func=lambda project_id: mcp_client.call_tool("get_project", {"projectId": project_id})
         ),
         Tool(
-            name="assign_task",
+            name="get_next_task",
             description="Get next task assignment",
-            func=lambda project_id, agent_name: mcp_client.call_tool("assign_task", {
+            func=lambda project_id, agent_name: mcp_client.call_tool("get_next_task", {
                 "projectId": project_id,
                 "agentName": agent_name
             })
@@ -570,6 +577,15 @@ def create_taskdriver_agent(mcp_client):
                 "description": "Get project details and instructions",
                 "parameters": {"projectId": {"type": "string"}},
                 "function": lambda project_id: mcp_client.call_tool("get_project", {"projectId": project_id})
+            },
+            {
+                "name": "get_next_task",
+                "description": "Get next task assignment",
+                "parameters": {"projectId": {"type": "string"}, "agentName": {"type": "string"}},
+                "function": lambda project_id, agent_name: mcp_client.call_tool("get_next_task", {
+                    "projectId": project_id,
+                    "agentName": agent_name
+                })
             }
         ]
     )
@@ -580,17 +596,18 @@ def create_taskdriver_agent(mcp_client):
 ### Common Issues
 
 1. **"Project not found"** - Verify project ID is correct
-2. **"Agent not registered"** - Use `register_agent` first
-3. **"No tasks available"** - Check if tasks exist and are queued
-4. **"Lease expired"** - Task took too long, extend lease or handle failure
-5. **"Validation error"** - Check parameter types and constraints
+2. **"No tasks available"** - Check if tasks exist and are queued
+3. **"Lease expired"** - Task took too long, extend lease or handle failure
+4. **"Validation error"** - Check parameter types and constraints
+5. **"Agent name mismatch"** - Ensure agent name matches between get_next_task and complete_task/fail_task
 
 ### Debug Steps
 
 1. Use `health_check` to verify system status
 2. Check `get_project_stats` for project health
 3. List tasks to verify they exist and are in expected state
-4. Monitor lease statistics with `get_lease_stats`
-5. Clean up expired leases if needed
+4. Use `list_active_agents` to see which agents are currently working
+5. Monitor lease statistics with `get_lease_stats`
+6. Clean up expired leases if needed
 
 For more detailed troubleshooting, see the [Configuration Guide](configuration.md) and [Architecture Overview](architecture.md).

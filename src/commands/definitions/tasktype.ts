@@ -64,7 +64,7 @@ export const createTaskType: CommandDefinition<typeof createTaskTypeParams> = {
   name: 'createTaskType',
   mcpName: 'create_task_type',
   cliName: 'create-task-type',
-  description: 'Create a new task type',
+  description: 'Create a reusable task template/type with variables for generating multiple similar tasks. Use this when you need to repeat the same type of work with different inputs (e.g., "Analyze {{document}} for {{purpose}}"). Essential for batch processing and workflow automation.',
   parameters: createTaskTypeParams,
   async handler(context, args) {
     // Find project
@@ -122,7 +122,7 @@ export const listTaskTypes: CommandDefinition<typeof listTaskTypesParams> = {
   name: 'listTaskTypes',
   mcpName: 'list_task_types',
   cliName: 'list-task-types',
-  description: 'List task types for a project',
+  description: 'List all task templates/types in a project. Use this to see what task templates are available, find existing templates before creating new ones, or understand the types of work that can be automated in this project.',
   parameters: listTaskTypesParams,
   async handler(context, args) {
     // Find project
@@ -169,7 +169,7 @@ export const getTaskType: CommandDefinition<typeof getTaskTypeParams> = {
   name: 'getTaskType',
   mcpName: 'get_task_type',
   cliName: 'get-task-type',
-  description: 'Get task type details',
+  description: 'Get detailed information about a specific task template/type including its template structure, variables, and configuration. Use this to understand how to create tasks from this template or verify template settings.',
   parameters: getTaskTypeParams,
   async handler(context, args) {
     const taskType = await context.taskType.getTaskType(args.taskTypeId);

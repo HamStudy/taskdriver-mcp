@@ -4,7 +4,8 @@ import {
   TaskCreateInput, 
   TaskUpdateInput, 
   TaskFilters,
-  TaskInput
+  TaskInput,
+  TaskAssignmentResult
 } from '../types/index.js';
 import { StorageProvider } from '../storage/index.js';
 import { 
@@ -264,12 +265,12 @@ export class TaskService {
   /**
    * Get the next available task for an agent (used by AgentService)
    */
-  async getNextTaskForAgent(projectId: string, agentName: string): Promise<Task | null> {
+  async getNextTaskForAgent(projectId: string, agentName: string): Promise<TaskAssignmentResult> {
     // Clean up expired leases before assigning new tasks
     await this.leaseService.cleanupExpiredLeases(projectId);
     
-    // This delegates to the storage provider's atomic assignTask operation
-    return this.storage.assignTask(projectId, agentName);
+    // This delegates to the storage provider's atomic getNextTask operation
+    return this.storage.getNextTask(projectId, agentName);
   }
 
   /**

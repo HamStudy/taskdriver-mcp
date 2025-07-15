@@ -19,10 +19,10 @@ const createTaskParams = [
     positional: true
   },
   {
-    name: 'typeId',
+    name: 'type',
     type: 'string',
     description: 'Task type ID or name',
-    alias: ['type', 't']
+    alias: ['type-id', 't']
   },
   {
     name: 'instructions',
@@ -53,7 +53,7 @@ export const createTask: CommandDefinition<typeof createTaskParams> = {
   name: 'createTask',
   mcpName: 'create_task',
   cliName: 'create-task',
-  description: 'Create a new task',
+  description: 'Create a single work item/task for agents to execute. Use this for individual tasks, one-off work items, or when you need precise control over each task. For creating many similar tasks, consider using create_tasks_bulk with a task template instead.',
   parameters: createTaskParams,
   async handler(context, args) {
     // Find project
@@ -77,12 +77,12 @@ export const createTask: CommandDefinition<typeof createTaskParams> = {
 
     // Find task type or use first available
     let taskType;
-    if (args.typeId) {
-      taskType = findTaskTypeByNameOrId(taskTypes, args.typeId);
+    if (args.type) {
+      taskType = findTaskTypeByNameOrId(taskTypes, args.type);
       if (!taskType) {
         return {
           success: false,
-          error: `Task type '${args.typeId}' not found in project '${project.name}'`
+          error: `Task type '${args.type}' not found in project '${project.name}'`
         };
       }
     } else {
@@ -159,7 +159,7 @@ export const createTasksBulk: CommandDefinition<typeof createTasksBulkParams> = 
   name: 'createTasksBulk',
   mcpName: 'create_tasks_bulk',
   cliName: 'create-tasks-bulk',
-  description: 'Create multiple tasks from JSON array',
+  description: 'Create many tasks at once from a JSON array - ideal for batch processing, breaking down large work into many similar tasks, or processing lists of items. Use this when you have many similar tasks to create (e.g., processing multiple files, analyzing multiple documents, or repeating work across datasets).',
   parameters: createTasksBulkParams,
   async handler(context, args) {
     // Find project
@@ -230,9 +230,9 @@ const listTasksParams = [
     alias: 's'
   },
   {
-    name: 'typeId',
+    name: 'type',
     type: 'string',
-    description: 'Filter by task type ID',
+    description: 'Filter by task type ID or name',
     alias: ['type-id', 't']
   },
   {
@@ -261,7 +261,7 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
   name: 'listTasks',
   mcpName: 'list_tasks',
   cliName: 'list-tasks',
-  description: 'List tasks for a project',
+  description: 'List and filter tasks in a project by status, type, or assigned agent. Use this to monitor task progress, find specific tasks, check what work is queued/completed, or track task assignment status. Essential for workflow monitoring and progress tracking.',
   parameters: listTasksParams,
   async handler(context, args) {
     // Find project
@@ -276,7 +276,7 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
 
     const filters = {
       status: args.status,
-      typeId: args.typeId,
+      typeId: args.type, // Convert type to typeId for storage layer
       assignedTo: args.assignedTo,
       limit: args.limit,
       offset: args.offset
@@ -313,7 +313,7 @@ export const getTask: CommandDefinition<typeof getTaskParams> = {
   name: 'getTask',
   mcpName: 'get_task',
   cliName: 'get-task',
-  description: 'Get task details',
+  description: 'Get detailed information about a specific task including its status, instructions, variables, assignment info, and execution history. Use this to check task details, verify task configuration, or troubleshoot task issues.',
   parameters: getTaskParams,
   async handler(context, args) {
     const task = await context.task.getTask(args.taskId);

@@ -112,8 +112,8 @@ done
 
 log "✅ All $TASK_TYPE_COUNT task types created successfully"
 
-# Step 4: Register agents for each project
-echo -e "\n${BLUE}Step 4: Registering Agents${NC}"
+# Step 4: Prepare agent names for each project
+echo -e "\n${BLUE}Step 4: Preparing Agent Names${NC}"
 
 AGENT_COUNT=0
 for i in $(seq 1 $NUM_PROJECTS); do
@@ -122,23 +122,17 @@ for i in $(seq 1 $NUM_PROJECTS); do
     for j in $(seq 1 $NUM_AGENTS_PER_PROJECT); do
         AGENT_NAME="stress-agent-$i-$j"
         
-        log "🤖 Registering agent $AGENT_NAME"
+        log "🤖 Preparing agent name $AGENT_NAME"
         
-        AGENT_OUTPUT=$($CLI_CMD register-agent "$PROJECT_NAME" "$AGENT_NAME" \
-            --caps processing analysis stress-testing project-$i 2>/dev/null)
-        
-        if [[ $AGENT_OUTPUT == *"✅ Agent registered successfully"* ]]; then
-            AGENT_NAMES+=("$AGENT_NAME:$PROJECT_NAME")
-            AGENT_COUNT=$((AGENT_COUNT + 1))
-            log "✓ Agent registered: $AGENT_NAME"
-        else
-            echo -e "${RED}❌ Agent registration failed for $AGENT_NAME${NC}"
-            exit 1
-        fi
+        # In the lease-based model, agents don't need registration
+        # They just need names for task assignment
+        AGENT_NAMES+=("$AGENT_NAME:$PROJECT_NAME")
+        AGENT_COUNT=$((AGENT_COUNT + 1))
+        log "✓ Agent name prepared: $AGENT_NAME"
     done
 done
 
-log "✅ All $AGENT_COUNT agents registered successfully"
+log "✅ All $AGENT_COUNT agent names prepared successfully"
 
 # Step 5: Create massive number of tasks
 echo -e "\n${BLUE}Step 5: Creating Tasks (High Volume)${NC}"
@@ -223,10 +217,12 @@ for agent_info in "${AGENT_NAMES[@]}"; do
         # Each agent will try to process up to 10 tasks
         for attempt in {1..10}; do
             # Get next task
-            NEXT_TASK=$($CLI_CMD get-next-task "$AGENT_NAME" "$PROJECT_NAME" 2>/dev/null || echo "No tasks")
+            NEXT_TASK=$($CLI_CMD get-next-task "$PROJECT_NAME" "$AGENT_NAME" 2>/dev/null || echo "No tasks")
             
-            if [[ $NEXT_TASK == *"Task assigned"* ]]; then
-                TASK_ID=$(echo "$NEXT_TASK" | grep "Task:" | cut -d' ' -f2)
+            if [[ $NEXT_TASK == *"Task assigned"* || $NEXT_TASK == *"task"* ]]; then
+                # Extract task ID from JSON output
+                TASK_ID=$(echo "$NEXT_TASK" | grep -A 20 '"task":' | grep '"id":' | head -1 | sed 's/.*"id": *"\([^"]*\)".*/\1/')
+                echo "Agent $AGENT_NAME got task $TASK_ID" >> "/tmp/agent_${AGENT_NAME}.log"
                 
                 # Simulate processing time
                 sleep $PROCESSING_DELAY
@@ -235,11 +231,12 @@ for agent_info in "${AGENT_NAMES[@]}"; do
                 RESULT="{\"success\": true, \"agent\": \"$AGENT_NAME\", \"processed_at\": \"$(date)\", \"attempt\": $attempt}"
                 
                 if $CLI_CMD complete-task "$AGENT_NAME" "$PROJECT_NAME" "$TASK_ID" \
-                    --result "$RESULT" > "/tmp/agent_${AGENT_NAME}_${attempt}.out" 2>&1; then
+                    "$RESULT" >/dev/null 2>&1; then
                     local_processed=$((local_processed + 1))
                     echo "$local_processed" > "/tmp/agent_${AGENT_NAME}.count"
+                    echo "Agent $AGENT_NAME completed task $TASK_ID" >> "/tmp/agent_${AGENT_NAME}.log"
                 fi
-            elif [[ $NEXT_TASK == *"No tasks available"* ]]; then
+            elif [[ $NEXT_TASK == *"No tasks"* || $NEXT_TASK == *"no tasks"* ]]; then
                 # No more tasks, agent can stop
                 break
             else

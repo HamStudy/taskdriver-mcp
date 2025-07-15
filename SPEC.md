@@ -237,7 +237,6 @@ interface Agent {
   apiKey: string;  // Authentication token for this agent
   lastSeen: Date;
   connectedAt: Date;
-  capabilities?: string[];  // Optional: what task types this agent can handle
 }
 ```
 

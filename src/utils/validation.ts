@@ -156,7 +156,6 @@ export const createTaskSchema = Joi.object({
 export const createAgentSchema = Joi.object({
   name: agentNameSchema.optional(),
   projectId: uuidSchema,
-  capabilities: Joi.array().items(Joi.string().max(100)).max(20).optional(),
 });
 
 export const taskFiltersSchema = Joi.object({

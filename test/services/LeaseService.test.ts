@@ -68,17 +68,12 @@ describe('LeaseService', () => {
         instructions: 'Test task'
       });
 
-      // Create an agent
-      const agent = await storage.createAgent({
-        name: 'test-agent',
-        projectId,
-        capabilities: []
-      });
-
-      // Assign the task using the agent service
-      const assignedTask = await agentService.getNextTask(agent.name!, projectId);
-      expect(assignedTask).not.toBeNull();
-      expect(assignedTask!.id).toBe(task.id);
+      // Assign the task using the agent service (no need to create agent first)
+      const agentName = 'test-agent';
+      const assignmentResult = await agentService.getNextTask(projectId, agentName);
+      expect(assignmentResult.task).not.toBeNull();
+      expect(assignmentResult.task!.id).toBe(task.id);
+      expect(assignmentResult.agentName).toBe(agentName);
 
       // Manually expire the lease by setting it to the past
       const expiredTime = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
@@ -97,10 +92,9 @@ describe('LeaseService', () => {
       expect(updatedTask!.status).toBe('queued');
       expect(updatedTask!.retryCount).toBe(1);
 
-      // Verify the agent is idle
-      const updatedAgent = await storage.getAgent(agent.id);
-      expect(updatedAgent!.status).toBe('idle');
-      expect(updatedAgent!.currentTaskId).toBeUndefined();
+      // Verify the agent is no longer listed as active (since task is no longer assigned)
+      const agentStatus = await agentService.getAgentStatus(agentName, projectId);
+      expect(agentStatus).toBeNull();
     });
 
     it('should not reclaim non-expired tasks', async () => {
@@ -122,16 +116,10 @@ describe('LeaseService', () => {
         instructions: 'Test task'
       });
 
-      // Create an agent
-      const agent = await storage.createAgent({
-        name: 'test-agent',
-        projectId,
-        capabilities: []
-      });
-
-      // Assign the task using the agent service
-      const assignedTask = await agentService.getNextTask(agent.name!, projectId);
-      expect(assignedTask).not.toBeNull();
+      // Assign the task using the agent service (no need to create agent first)
+      const agentName = 'test-agent';
+      const assignmentResult = await agentService.getNextTask(projectId, agentName);
+      expect(assignmentResult.task).not.toBeNull();
 
       // Run lease cleanup
       const results = await leaseService.cleanupExpiredLeases(projectId);
@@ -142,12 +130,13 @@ describe('LeaseService', () => {
       // Verify the task is still running
       const updatedTask = await storage.getTask(task.id);
       expect(updatedTask!.status).toBe('running');
-      expect(updatedTask!.assignedTo).toBe(agent.name);
+      expect(updatedTask!.assignedTo).toBe(agentName);
 
       // Verify the agent is still working
-      const updatedAgent = await storage.getAgent(agent.id);
-      expect(updatedAgent!.status).toBe('working');
-      expect(updatedAgent!.currentTaskId).toBe(task.id);
+      const agentStatus = await agentService.getAgentStatus(agentName, projectId);
+      expect(agentStatus).not.toBeNull();
+      expect(agentStatus!.status).toBe('working');
+      expect(agentStatus!.currentTaskId).toBe(task.id);
     });
 
     it('should handle projects with no running tasks', async () => {
@@ -178,18 +167,12 @@ describe('LeaseService', () => {
         instructions: 'Test task'
       });
 
-      // Create an agent
-      const agent = await storage.createAgent({
-        name: 'test-agent',
-        projectId,
-        capabilities: []
-      });
-
-      // Assign the task using the agent service
-      const assignedTask = await agentService.getNextTask(agent.name!, projectId);
-      expect(assignedTask).not.toBeNull();
+      // Assign the task using the agent service (no need to create agent first)
+      const agentName = 'test-agent';
+      const assignmentResult = await agentService.getNextTask(projectId, agentName);
+      expect(assignmentResult.task).not.toBeNull();
       
-      const originalExpiry = assignedTask!.leaseExpiresAt!;
+      const originalExpiry = assignmentResult.task!.leaseExpiresAt!;
 
       // Extend the lease
       await leaseService.extendTaskLease(task.id, 30);
@@ -257,14 +240,9 @@ describe('LeaseService', () => {
         instructions: 'Test task 2'
       });
 
-      // Create an agent and assign one task
-      const agent = await storage.createAgent({
-        name: 'test-agent',
-        projectId,
-        capabilities: []
-      });
-
-      await agentService.getNextTask(agent.name!, projectId);
+      // Assign one task to an agent
+      const agentName = 'test-agent';
+      await agentService.getNextTask(projectId, agentName);
 
       // Expire one task
       const expiredTime = new Date(Date.now() - 10 * 60 * 1000);

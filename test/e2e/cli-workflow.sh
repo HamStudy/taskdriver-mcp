@@ -118,22 +118,11 @@ else
     exit 1
 fi
 
-# Step 7: Register agent
-echo -e "\n${BLUE}Step 4: Agent Registration${NC}"
-echo "🤖 Registering agent '$AGENT_NAME'..."
-AGENT_OUTPUT=$($CLI_CMD register-agent "$PROJECT_NAME" "$AGENT_NAME" --caps processing analysis file-handling)
-
-if [[ $AGENT_OUTPUT == *"✅"* ]]; then
-    echo "✓ Agent registered successfully"
-else
-    echo -e "${RED}❌ Agent registration failed${NC}"
-    echo "$AGENT_OUTPUT"
-    exit 1
-fi
-
-# Extract API key
-API_KEY=$(echo "$AGENT_OUTPUT" | grep "API Key:" | cut -d' ' -f3)
-echo "✓ Agent API Key: $API_KEY"
+# Step 7: Agent Name Setup (no registration needed in lease-based model)
+echo -e "\n${BLUE}Step 4: Agent Setup${NC}"
+echo "🤖 Setting up agent name '$AGENT_NAME'..."
+echo "✓ Agent name prepared (no registration needed in lease-based model)"
+echo "✓ Agents are ephemeral queue workers in the new architecture"
 
 # Step 8: Create multiple tasks
 echo -e "\n${BLUE}Step 5: Task Creation${NC}"
@@ -185,7 +174,7 @@ for i in {1..3}; do
     
     # Get next task
     echo "📥 Getting next task for agent..."
-    NEXT_TASK_OUTPUT=$($CLI_CMD get-next-task "$AGENT_NAME" "$PROJECT_NAME")
+    NEXT_TASK_OUTPUT=$($CLI_CMD get-next-task "$PROJECT_NAME" "$AGENT_NAME")
     
     if [[ $NEXT_TASK_OUTPUT == *"✅"* && $NEXT_TASK_OUTPUT == *"task"* ]]; then
         echo "✓ Task assigned to agent"
@@ -288,7 +277,7 @@ echo ""
 echo "📊 Test Summary:"
 echo "  • Project created and managed ✓"
 echo "  • Task type created with templates ✓"
-echo "  • Agent registered with capabilities ✓"
+echo "  • Agent setup (lease-based model) ✓"
 echo "  • 3 tasks created and processed ✓"
 echo "  • Complete agent workflow tested ✓"
 echo "  • Statistics and monitoring verified ✓"

@@ -11,9 +11,8 @@ import {
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
-  Agent, 
-  AgentCreateInput, 
-  AgentUpdateInput,
+  TaskAssignmentResult,
+  AgentStatus,
   Session,
   SessionCreateInput,
   SessionUpdateInput
@@ -49,20 +48,16 @@ export interface StorageProvider {
   listTasks(projectId: string, filters?: TaskFilters): Promise<Task[]>;
   deleteTask(taskId: string): Promise<void>;
   
-  // Agent operations
-  createAgent(input: AgentCreateInput): Promise<Agent>;
-  getAgent(agentId: string): Promise<Agent | null>;
-  getAgentByName(agentName: string, projectId: string): Promise<Agent | null>;
-  getAgentByApiKey(hashedApiKey: string, projectId: string): Promise<Agent | null>;
-  updateAgent(agentId: string, input: AgentUpdateInput): Promise<Agent>;
-  listAgents(projectId: string): Promise<Agent[]>;
-  deleteAgent(agentId: string): Promise<void>;
-
-  // CRITICAL: Atomic operations for task assignment
+  // CRITICAL: Lease-based task assignment (atomic operations)
   // These MUST be atomic across all providers to prevent race conditions
-  assignTask(projectId: string, agentName: string): Promise<Task | null>;
-  completeTask(taskId: string, result: TaskResult): Promise<void>;
-  failTask(taskId: string, result: TaskResult, canRetry?: boolean): Promise<void>;
+  getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult>;
+  completeTask(taskId: string, agentName: string, result: TaskResult): Promise<void>;
+  failTask(taskId: string, agentName: string, result: TaskResult, canRetry?: boolean): Promise<void>;
+  
+  // Agent status operations (for monitoring/compatibility)
+  // These work with the lease data, no persistent agent storage
+  listActiveAgents(projectId: string): Promise<AgentStatus[]>;
+  getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null>;
   
   // Lease management operations
   findExpiredLeases(): Promise<Task[]>;
@@ -138,17 +133,14 @@ export abstract class BaseStorageProvider implements StorageProvider {
   abstract listTasks(projectId: string, filters?: TaskFilters): Promise<Task[]>;
   abstract deleteTask(taskId: string): Promise<void>;
 
-  abstract createAgent(input: AgentCreateInput): Promise<Agent>;
-  abstract getAgent(agentId: string): Promise<Agent | null>;
-  abstract getAgentByName(agentName: string, projectId: string): Promise<Agent | null>;
-  abstract getAgentByApiKey(hashedApiKey: string, projectId: string): Promise<Agent | null>;
-  abstract updateAgent(agentId: string, input: AgentUpdateInput): Promise<Agent>;
-  abstract listAgents(projectId: string): Promise<Agent[]>;
-  abstract deleteAgent(agentId: string): Promise<void>;
-
-  abstract assignTask(projectId: string, agentName: string): Promise<Task | null>;
-  abstract completeTask(taskId: string, result: TaskResult): Promise<void>;
-  abstract failTask(taskId: string, result: TaskResult, canRetry?: boolean): Promise<void>;
+  // CRITICAL: Lease-based task assignment (atomic operations)
+  abstract getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult>;
+  abstract completeTask(taskId: string, agentName: string, result: TaskResult): Promise<void>;
+  abstract failTask(taskId: string, agentName: string, result: TaskResult, canRetry?: boolean): Promise<void>;
+  
+  // Agent status operations (for monitoring/compatibility)
+  abstract listActiveAgents(projectId: string): Promise<AgentStatus[]>;
+  abstract getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null>;
 
   abstract findExpiredLeases(): Promise<Task[]>;
   abstract requeueTask(taskId: string): Promise<void>;

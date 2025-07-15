@@ -146,8 +146,7 @@ Agents are workers that execute tasks:
 
 ```bash
 # Register an agent
-taskdriver register-agent "ai-analysis" "security-agent" \\
-  --capabilities "security-analysis" "code-review"
+taskdriver register-agent "ai-analysis" "security-agent"
 
 # Get next task for agent
 taskdriver get-next-task "security-agent" "ai-analysis"

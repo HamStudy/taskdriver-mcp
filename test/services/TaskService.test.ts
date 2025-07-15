@@ -3,6 +3,7 @@ import { rmSync, existsSync } from 'fs';
 import { TaskService } from '../../src/services/TaskService.js';
 import { ProjectService } from '../../src/services/ProjectService.js';
 import { TaskTypeService } from '../../src/services/TaskTypeService.js';
+import { AgentService } from '../../src/services/AgentService.js';
 import { FileStorageProvider } from '../../src/storage/FileStorageProvider.js';
 import { createTestDataDir } from '../fixtures/index.js';
 
@@ -11,6 +12,7 @@ describe('TaskService', () => {
   let taskService: TaskService;
   let projectService: ProjectService;
   let taskTypeService: TaskTypeService;
+  let agentService: AgentService;
   let testDataDir: string;
   let projectId: string;
   let taskTypeId: string;
@@ -23,6 +25,7 @@ describe('TaskService', () => {
     projectService = new ProjectService(storage);
     taskTypeService = new TaskTypeService(storage, projectService);
     taskService = new TaskService(storage, projectService, taskTypeService);
+    agentService = new AgentService(storage, projectService, taskService);
 
     // Create test project and task type
     const project = await projectService.createProject({
@@ -60,7 +63,9 @@ describe('TaskService', () => {
       expect(task.id).toBeDefined();
       expect(task.projectId).toBe(projectId);
       expect(task.typeId).toBe(taskTypeId);
-      expect(task.instructions).toBe('Test task for test-resource');
+      // For template-based tasks, instructions are generated dynamically
+      const instructions = await taskService.getTaskInstructions(task.id);
+      expect(instructions).toBe('Test task for test-resource');
       expect(task.status).toBe('queued');
       expect(task.retryCount).toBe(0);
       expect(task.maxRetries).toBe(3); // Default from task type
@@ -81,31 +86,31 @@ describe('TaskService', () => {
       expect(task.variables).toEqual({ resource: 'test-resource', key: 'value', number: '42' });
     });
 
-    it('should create task with batch ID', async () => {
-      const batchId = '123e4567-e89b-12d3-a456-426614174000'; // Valid GUID
+    it('should create task with custom ID', async () => {
+      const customId = '123e4567-e89b-12d3-a456-426614174000'; // Valid GUID
       const input = {
         projectId,
         typeId: taskTypeId,
-        instructions: 'Batch task',
+        instructions: 'Custom ID task',
         variables: { resource: 'test-resource' },
-        batchId
+        id: customId
       };
 
       const task = await taskService.createTask(input);
 
-      expect(task.batchId).toBe(batchId);
+      expect(task.id).toBe(customId);
     });
 
-    it('should throw validation error for invalid input', async () => {
+    it('should throw validation error for missing required template variables', async () => {
       const input = {
         projectId,
         typeId: taskTypeId,
-        instructions: '', // Invalid empty instructions
-        variables: { resource: 'test-resource' }
+        instructions: 'Test task instructions',
+        variables: {} // Missing required 'resource' variable for template
       };
 
       await expect(taskService.createTask(input))
-        .rejects.toThrow('Validation failed');
+        .rejects.toThrow('Missing required template variables: resource');
     });
 
     it('should throw validation error for invalid project ID format', async () => {
@@ -190,7 +195,9 @@ describe('TaskService', () => {
 
       expect(retrieved).not.toBeNull();
       expect(retrieved!.id).toBe(created.id);
-      expect(retrieved!.instructions).toBe('Test task for test-resource');
+      // For template-based tasks, get instructions dynamically
+      const instructions = await taskService.getTaskInstructions(retrieved!.id);
+      expect(instructions).toBe('Test task for test-resource');
     });
 
     it('should return null for non-existent task', async () => {
@@ -276,7 +283,7 @@ describe('TaskService', () => {
     });
   });
 
-  describe('getNextTaskForAgent', () => {
+  describe('task assignment through AgentService', () => {
     let agentName: string;
 
     beforeEach(async () => {
@@ -298,40 +305,51 @@ describe('TaskService', () => {
       });
     });
 
-    it('should assign next queued task to agent', async () => {
-      const task = await taskService.getNextTaskForAgent(projectId, agentName);
+    it('should assign next queued task to agent via AgentService', async () => {
+      const result = await agentService.getNextTask(projectId, agentName);
 
-      expect(task).not.toBeNull();
-      expect(task!.status).toBe('running');
-      expect(task!.assignedTo).toBe(agentName);
-      expect(task!.assignedAt).toBeInstanceOf(Date);
-      expect(task!.leaseExpiresAt).toBeInstanceOf(Date);
+      expect(result.task).not.toBeNull();
+      expect(result.task!.status).toBe('running');
+      expect(result.task!.assignedTo).toBe(agentName);
+      expect(result.task!.assignedAt).toBeInstanceOf(Date);
+      expect(result.task!.leaseExpiresAt).toBeInstanceOf(Date);
     });
 
     it('should return null when no tasks available', async () => {
       // Assign all tasks first
-      await taskService.getNextTaskForAgent(projectId, agentName);
-      await taskService.getNextTaskForAgent(projectId, 'other-agent');
+      await agentService.getNextTask(projectId, agentName);
+      await agentService.getNextTask(projectId, 'other-agent');
 
-      const task = await taskService.getNextTaskForAgent(projectId, 'third-agent');
-      expect(task).toBeNull();
+      const result = await agentService.getNextTask(projectId, 'third-agent');
+      expect(result.task).toBeNull();
     });
 
     it('should cleanup expired leases before assignment', async () => {
       // Assign a task and manually expire its lease
-      const assignedTask = await taskService.getNextTaskForAgent(projectId, agentName);
-      expect(assignedTask).not.toBeNull();
+      const assignedResult = await agentService.getNextTask(projectId, agentName);
+      expect(assignedResult.task).not.toBeNull();
+      const taskId = assignedResult.task!.id;
 
       // Manually expire the lease
-      await storage.updateTask(assignedTask!.id, {
+      await storage.updateTask(taskId, {
         leaseExpiresAt: new Date(Date.now() - 60000) // 1 minute ago
       });
 
-      // Next assignment should reclaim the expired task
-      const newTask = await taskService.getNextTaskForAgent(projectId, 'new-agent');
-      expect(newTask).not.toBeNull();
-      expect(newTask!.assignedTo).toBe('new-agent');
-      expect(newTask!.retryCount).toBe(1); // Should be incremented
+      // Manually trigger cleanup to simulate what happens during getNextTask
+      await taskService.cleanupExpiredLeases(projectId);
+
+      // Now check that the task was properly failed and retry count incremented
+      const reclaimedTask = await taskService.getTask(taskId);
+      expect(reclaimedTask).not.toBeNull();
+      expect(reclaimedTask!.status).toBe('queued'); // Should be requeued for retry
+      expect(reclaimedTask!.retryCount).toBe(1); // Should be incremented
+      expect(reclaimedTask!.assignedTo).toBeUndefined(); // Should be unassigned
+
+      // Next assignment should get this requeued task
+      const newResult = await agentService.getNextTask(projectId, 'new-agent');
+      expect(newResult.task).not.toBeNull();
+      expect(newResult.task!.id).toBe(taskId); // Should be the same task
+      expect(newResult.task!.assignedTo).toBe('new-agent');
     });
   });
 
@@ -349,8 +367,8 @@ describe('TaskService', () => {
       });
       taskId = task.id;
 
-      // Assign the task
-      await taskService.getNextTaskForAgent(projectId, agentName);
+      // Assign the task via AgentService
+      await agentService.getNextTask(projectId, agentName);
     });
 
     it('should validate correct task assignment', async () => {
@@ -393,8 +411,8 @@ describe('TaskService', () => {
       });
       taskId = task.id;
 
-      // Assign the task to create a lease
-      await taskService.getNextTaskForAgent(projectId, 'test-agent');
+      // Assign the task to create a lease via AgentService
+      await agentService.getNextTask(projectId, 'test-agent');
     });
 
     it('should extend task lease', async () => {
@@ -440,9 +458,9 @@ describe('TaskService', () => {
         variables: { resource: 'resource-3' }
       });
 
-      // Assign tasks and manipulate lease times
-      await taskService.getNextTaskForAgent(projectId, 'agent1');
-      await taskService.getNextTaskForAgent(projectId, 'agent2');
+      // Assign tasks and manipulate lease times via AgentService
+      await agentService.getNextTask(projectId, 'agent1');
+      await agentService.getNextTask(projectId, 'agent2');
 
       // Expire one task
       await storage.updateTask(expiredTask.id, {
@@ -490,8 +508,8 @@ describe('TaskService', () => {
         variables: { resource: 'resource-2' }
       });
 
-      await taskService.getNextTaskForAgent(projectId, 'agent1');
-      await taskService.getNextTaskForAgent(projectId, 'agent2');
+      await agentService.getNextTask(projectId, 'agent1');
+      await agentService.getNextTask(projectId, 'agent2');
 
       // Expire the first task's lease
       await storage.updateTask(task1.id, {

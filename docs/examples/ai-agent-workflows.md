@@ -232,24 +232,19 @@ taskdriver create-task-type "ai-code-analysis" "ai-documentation" \
 
 ```bash
 # Security specialist AI agent
-taskdriver register-agent "ai-code-analysis" "ai-security-specialist" \
-  --capabilities "security-analysis" "vulnerability-detection" "compliance-checking" "penetration-testing" "threat-modeling"
+taskdriver register-agent "ai-code-analysis" "ai-security-specialist"
 
 # Architecture specialist AI agent
-taskdriver register-agent "ai-code-analysis" "ai-architect" \
-  --capabilities "architecture-analysis" "system-design" "scalability-assessment" "performance-optimization" "technology-evaluation"
+taskdriver register-agent "ai-code-analysis" "ai-architect"
 
 # Code quality specialist AI agent
-taskdriver register-agent "ai-code-analysis" "ai-quality-expert" \
-  --capabilities "code-review" "refactoring" "best-practices" "testing" "maintainability"
+taskdriver register-agent "ai-code-analysis" "ai-quality-expert"
 
 # Documentation specialist AI agent
-taskdriver register-agent "ai-code-analysis" "ai-documentation-expert" \
-  --capabilities "documentation-generation" "api-documentation" "tutorial-creation" "diagram-generation" "technical-writing"
+taskdriver register-agent "ai-code-analysis" "ai-documentation-expert"
 
 # Multi-purpose AI agent
-taskdriver register-agent "ai-code-analysis" "ai-generalist" \
-  --capabilities "general-analysis" "code-review" "documentation" "testing" "integration"
+taskdriver register-agent "ai-code-analysis" "ai-generalist"
 ```
 
 ## Complex Multi-Step Workflow Example

@@ -322,7 +322,8 @@ describe('FileStorageProvider', () => {
           typeId: taskType.id 
         }));
         
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
+        const result = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = result.task;
         
         expect(assignedTask).not.toBeNull();
         expect(assignedTask!.id).toBe(task.id);
@@ -334,7 +335,8 @@ describe('FileStorageProvider', () => {
       });
 
       it('should return null when no tasks are available', async () => {
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
+        const result = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = result.task;
         expect(assignedTask).toBeNull();
       });
 
@@ -354,7 +356,8 @@ describe('FileStorageProvider', () => {
           instructions: 'Second task'
         }));
         
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
+        const result = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = result.task;
         expect(assignedTask!.id).toBe(task1.id); // First task should be assigned first
       });
     });
@@ -365,19 +368,20 @@ describe('FileStorageProvider', () => {
           projectId: project.id, 
           typeId: taskType.id 
         }));
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
-        const result = createMockTaskResult();
+        const assignResult = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = assignResult.task;
+        const taskResult = createMockTaskResult();
         
-        await storage.completeTask(assignedTask!.id, result);
+        await storage.completeTask(assignedTask!.id, 'test-agent', taskResult);
         
         const completedTask = await storage.getTask(assignedTask!.id);
         expect(completedTask!.status).toBe('completed');
-        expect(completedTask!.result).toEqual(result);
+        expect(completedTask!.result).toEqual(taskResult);
         expect(completedTask!.completedAt).toBeInstanceOf(Date);
         expect(completedTask!.assignedTo).toBeUndefined();
         expect(completedTask!.leaseExpiresAt).toBeUndefined();
         expect(completedTask!.attempts[0].status).toBe('completed');
-        expect(completedTask!.attempts[0].result).toEqual(result);
+        expect(completedTask!.attempts[0].result).toEqual(taskResult);
       });
     });
 
@@ -387,10 +391,11 @@ describe('FileStorageProvider', () => {
           projectId: project.id, 
           typeId: taskType.id 
         }));
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
-        const result = createMockFailedTaskResult();
+        const assignResult = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = assignResult.task;
+        const failResult = createMockFailedTaskResult();
         
-        await storage.failTask(assignedTask!.id, result, true);
+        await storage.failTask(assignedTask!.id, 'test-agent', failResult, true);
         
         const failedTask = await storage.getTask(assignedTask!.id);
         expect(failedTask!.status).toBe('queued'); // Should be requeued
@@ -398,7 +403,7 @@ describe('FileStorageProvider', () => {
         expect(failedTask!.assignedTo).toBeUndefined();
         expect(failedTask!.leaseExpiresAt).toBeUndefined();
         expect(failedTask!.attempts[0].status).toBe('failed');
-        expect(failedTask!.attempts[0].result).toEqual(result);
+        expect(failedTask!.attempts[0].result).toEqual(failResult);
       });
 
       it('should fail task permanently when retry limit reached', async () => {
@@ -409,14 +414,15 @@ describe('FileStorageProvider', () => {
         
         // Simulate max retries reached
         await storage.updateTask(task.id, { retryCount: taskType.maxRetries });
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
-        const result = createMockFailedTaskResult();
+        const assignResult = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = assignResult.task;
+        const failResult = createMockFailedTaskResult();
         
-        await storage.failTask(assignedTask!.id, result, true);
+        await storage.failTask(assignedTask!.id, 'test-agent', failResult, true);
         
         const failedTask = await storage.getTask(assignedTask!.id);
         expect(failedTask!.status).toBe('failed'); // Should be permanently failed
-        expect(failedTask!.result).toEqual(result);
+        expect(failedTask!.result).toEqual(failResult);
         expect(failedTask!.failedAt).toBeInstanceOf(Date);
       });
 
@@ -425,10 +431,11 @@ describe('FileStorageProvider', () => {
           projectId: project.id, 
           typeId: taskType.id 
         }));
-        const assignedTask = await storage.assignTask(project.id, 'test-agent');
-        const result = createMockFailedTaskResult();
+        const assignResult = await storage.getNextTask(project.id, 'test-agent');
+        const assignedTask = assignResult.task;
+        const failResult = createMockFailedTaskResult();
         
-        await storage.failTask(assignedTask!.id, result, false); // Don't retry
+        await storage.failTask(assignedTask!.id, 'test-agent', failResult, false); // Don't retry
         
         const failedTask = await storage.getTask(assignedTask!.id);
         expect(failedTask!.status).toBe('failed'); // Should be permanently failed
@@ -436,114 +443,101 @@ describe('FileStorageProvider', () => {
     });
   });
 
-  describe('Agent Operations', () => {
+  describe('Lease-based Agent Operations', () => {
     let project: any;
+    let taskType: any;
 
     beforeEach(async () => {
       project = await storage.createProject(createMockProjectInput());
+      taskType = await storage.createTaskType(createMockTaskTypeInput({ projectId: project.id }));
     });
 
-    describe('createAgent', () => {
-      it('should create an agent successfully', async () => {
-        const input = createMockAgentInput({ projectId: project.id });
-        const agent = await storage.createAgent(input);
-        
-        expect(agent.id).toBeDefined();
-        expect(agent.name).toBe(input.name);
-        expect(agent.projectId).toBe(project.id);
-        expect(agent.status).toBe('idle');
-        expect(agent.capabilities).toEqual(input.capabilities);
-        expect(agent.createdAt).toBeInstanceOf(Date);
-        expect(agent.lastSeen).toBeInstanceOf(Date);
+    describe('listActiveAgents', () => {
+      it('should return empty list when no agents are working', async () => {
+        const agents = await storage.listActiveAgents(project.id);
+        expect(agents).toHaveLength(0);
       });
 
-      it('should generate name when not provided', async () => {
-        const input = createMockAgentInput({ projectId: project.id, name: undefined });
-        const agent = await storage.createAgent(input);
-        
-        expect(agent.name).toBeDefined();
-        expect(agent.name).toMatch(/^agent-\d+$/);
-      });
-    });
-
-    describe('getAgentByName', () => {
-      it('should retrieve agent by name', async () => {
-        const input = createMockAgentInput({ projectId: project.id });
-        const created = await storage.createAgent(input);
-        const retrieved = await storage.getAgentByName(created.name, project.id);
-        
-        expect(retrieved).not.toBeNull();
-        expect(retrieved!.id).toBe(created.id);
-        expect(retrieved!.name).toBe(created.name);
-      });
-
-      it('should return null for non-existent agent', async () => {
-        const retrieved = await storage.getAgentByName('non-existent', project.id);
-        expect(retrieved).toBeNull();
-      });
-    });
-
-    describe('getAgentByApiKey', () => {
-      it('should retrieve agent by API key hash', async () => {
-        const input = createMockAgentInput({ 
+      it('should list agents with active task leases', async () => {
+        // Create tasks and assign them to agents
+        await storage.createTask(createMockTaskInput({ 
           projectId: project.id, 
-          apiKeyHash: 'test-hash' 
-        });
-        const created = await storage.createAgent(input);
-        const retrieved = await storage.getAgentByApiKey('test-hash', project.id);
-        
-        expect(retrieved).not.toBeNull();
-        expect(retrieved!.id).toBe(created.id);
-      });
-
-      it('should return null for non-existent API key', async () => {
-        const retrieved = await storage.getAgentByApiKey('non-existent-hash', project.id);
-        expect(retrieved).toBeNull();
-      });
-    });
-
-    describe('updateAgent', () => {
-      it('should update agent properties', async () => {
-        const agent = await storage.createAgent(createMockAgentInput({ projectId: project.id }));
-        // Small delay to ensure different timestamp
-        await new Promise(resolve => setTimeout(resolve, 1));
-        const updated = await storage.updateAgent(agent.id, {
-          status: 'working',
-          currentTaskId: 'task-123',
-          lastSeen: new Date()
-        });
-        
-        expect(updated.status).toBe('working');
-        expect(updated.currentTaskId).toBe('task-123');
-        expect(updated.lastSeen.getTime()).toBeGreaterThan(agent.lastSeen.getTime());
-      });
-    });
-
-    describe('listAgents', () => {
-      it('should list agents for a project', async () => {
-        const agent1 = await storage.createAgent(createMockAgentInput({ 
-          projectId: project.id, 
-          name: 'agent1' 
+          typeId: taskType.id 
         }));
-        const agent2 = await storage.createAgent(createMockAgentInput({ 
+        await storage.createTask(createMockTaskInput({ 
           projectId: project.id, 
-          name: 'agent2' 
+          typeId: taskType.id 
         }));
-        
-        const agents = await storage.listAgents(project.id);
+
+        const result1 = await storage.getNextTask(project.id, 'agent-1');
+        const result2 = await storage.getNextTask(project.id, 'agent-2');
+
+        expect(result1.task).not.toBeNull();
+        expect(result2.task).not.toBeNull();
+
+        const agents = await storage.listActiveAgents(project.id);
         expect(agents).toHaveLength(2);
-        expect(agents.map(a => a.id)).toContain(agent1.id);
-        expect(agents.map(a => a.id)).toContain(agent2.id);
+        
+        const agentNames = agents.map(a => a.name).sort();
+        expect(agentNames).toEqual(['agent-1', 'agent-2']);
+        
+        for (const agent of agents) {
+          expect(agent.status).toBe('working');
+          expect(agent.currentTaskId).toBeDefined();
+          expect(agent.leaseExpiresAt).toBeInstanceOf(Date);
+        }
       });
     });
 
-    describe('deleteAgent', () => {
-      it('should delete an agent', async () => {
-        const agent = await storage.createAgent(createMockAgentInput({ projectId: project.id }));
-        await storage.deleteAgent(agent.id);
+    describe('getAgentStatus', () => {
+      it('should return null for agent with no active lease', async () => {
+        const status = await storage.getAgentStatus('non-existent-agent', project.id);
+        expect(status).toBeNull();
+      });
+
+      it('should return status for agent with active lease', async () => {
+        await storage.createTask(createMockTaskInput({ 
+          projectId: project.id, 
+          typeId: taskType.id 
+        }));
+
+        const result = await storage.getNextTask(project.id, 'test-agent');
+        expect(result.task).not.toBeNull();
+
+        const status = await storage.getAgentStatus('test-agent', project.id);
+        expect(status).not.toBeNull();
+        expect(status!.name).toBe('test-agent');
+        expect(status!.status).toBe('working');
+        expect(status!.currentTaskId).toBe(result.task!.id);
+        expect(status!.leaseExpiresAt).toBeInstanceOf(Date);
+      });
+    });
+
+    describe('extendLease', () => {
+      it('should extend lease for running task', async () => {
+        const task = await storage.createTask(createMockTaskInput({ 
+          projectId: project.id, 
+          typeId: taskType.id 
+        }));
+
+        const result = await storage.getNextTask(project.id, 'test-agent');
+        expect(result.task).not.toBeNull();
+
+        const originalExpiry = result.task!.leaseExpiresAt!;
         
-        const retrieved = await storage.getAgent(agent.id);
-        expect(retrieved).toBeNull();
+        await storage.extendLease(result.task!.id, 30); // Extend by 30 minutes
+        
+        const updatedTask = await storage.getTask(result.task!.id);
+        expect(updatedTask!.leaseExpiresAt!.getTime()).toBeGreaterThan(originalExpiry.getTime());
+      });
+
+      it('should throw error for non-running task', async () => {
+        const task = await storage.createTask(createMockTaskInput({ 
+          projectId: project.id, 
+          typeId: taskType.id 
+        }));
+
+        await expect(storage.extendLease(task.id, 30)).rejects.toThrow();
       });
     });
   });

@@ -73,14 +73,8 @@ else
     exit 1
 fi
 
-echo "🔧 Registering agent via CLI (simulating MCP tool call)..."
-AGENT_OUTPUT=$(bun run src/cli.ts register-agent "$TEST_PROJECT" "$TEST_AGENT" --caps document-analysis nlp)
-if [[ $AGENT_OUTPUT == *"✅ Agent registered successfully"* ]]; then
-    echo "✓ Agent registration successful"
-else
-    echo -e "${RED}❌ Agent registration failed${NC}"
-    exit 1
-fi
+echo "🔧 Setting up agent name (simulating MCP tool call)..."
+echo "✓ Agent name '$TEST_AGENT' prepared (no registration needed in lease-based model)"
 
 # Step 3: Test concurrent operations (simulating multiple MCP clients)
 echo -e "\n${BLUE}Step 3: Concurrent Operations Test${NC}"
@@ -133,23 +127,23 @@ for agent_num in {1..3}; do
     (
         local_agent="$TEST_AGENT-$agent_num"
         
-        # Register agent
-        bun run src/cli.ts register-agent "$TEST_PROJECT" "$local_agent" --caps processing > "/tmp/agent_${agent_num}_reg.out" 2>&1
+        # In lease-based model, agents don't need registration
+        # They just need names for task assignment
         
         # Process tasks
         for task_num in {1..2}; do
             # Get next task
-            NEXT_TASK=$(bun run src/cli.ts get-next-task "$local_agent" "$TEST_PROJECT" 2>/dev/null || echo "No tasks")
+            NEXT_TASK=$(bun run src/cli.ts get-next-task "$TEST_PROJECT" "$local_agent" 2>/dev/null || echo "No tasks")
             
-            if [[ $NEXT_TASK == *"Task assigned"* ]]; then
-                TASK_ID=$(echo "$NEXT_TASK" | grep "Task:" | cut -d' ' -f2)
+            if [[ $NEXT_TASK == *"Task assigned"* || $NEXT_TASK == *"task"* ]]; then
+                TASK_ID=$(echo "$NEXT_TASK" | grep -A 20 '"task":' | grep '"id":' | head -1 | sed 's/.*"id": *"\([^"]*\)".*/\1/')
                 
                 # Simulate processing
                 sleep 1
                 
                 # Complete task
                 bun run src/cli.ts complete-task "$local_agent" "$TEST_PROJECT" "$TASK_ID" \
-                    --result "{\"success\": true, \"agent\": \"$local_agent\", \"taskNum\": $task_num}" \
+                    "{\"success\": true, \"agent\": \"$local_agent\", \"taskNum\": $task_num}" \
                     > "/tmp/agent_${agent_num}_task_${task_num}.out" 2>&1
             fi
         done

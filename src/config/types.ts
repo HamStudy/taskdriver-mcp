@@ -41,6 +41,11 @@ export interface TaskDriverConfig {
     sessionTimeout: number;
   };
 
+  // MCP configuration
+  mcp: {
+    promptPrefix: string;
+  };
+
   // Default project settings
   defaults: {
     maxRetries: number;
@@ -94,6 +99,10 @@ export const configSchema = Joi.object<TaskDriverConfig>({
     level: Joi.string().valid('debug', 'info', 'warn', 'error').default('info'),
     pretty: Joi.boolean().default(process.env.NODE_ENV !== 'production'),
     correlation: Joi.boolean().default(true),
+  }).default(),
+
+  mcp: Joi.object({
+    promptPrefix: Joi.string().default('taskdriver'),
   }).default(),
 
   security: Joi.object({

@@ -108,10 +108,10 @@ expect_failure \
     '$CLI_CMD get-project "non-existent-project"' \
     "not found"
 
-expect_success \
-    "Creating project with duplicate name (should be allowed)" \
+expect_failure \
+    "Creating project with duplicate name (should fail)" \
     '$CLI_CMD create-project "$TEST_PROJECT" "duplicate description"' \
-    "Project created successfully"
+    "already exists"
 
 echo "✅ Project failure tests completed"
 
@@ -138,6 +138,11 @@ TASK_TYPE_OUTPUT=$($CLI_CMD create-task-type "$TEST_PROJECT" "valid-task-type" -
 TASK_TYPE_ID=$(echo "$TASK_TYPE_OUTPUT" | grep -o '[a-f0-9\-]\{36\}' | head -1)
 echo "✓ Valid task type created for further tests: $TASK_TYPE_ID"
 
+# Create a simpler task type for testing invalid task type scenarios
+SIMPLE_TYPE_OUTPUT=$($CLI_CMD create-task-type "$TEST_PROJECT" "simple-type" --template "Simple task")
+SIMPLE_TYPE_ID=$(echo "$SIMPLE_TYPE_OUTPUT" | grep -o '[a-f0-9\-]\{36\}' | head -1)
+echo "✓ Simple task type created for testing: $SIMPLE_TYPE_ID"
+
 echo "✅ Task type failure tests completed"
 
 # Step 4: Task creation failures
@@ -145,13 +150,13 @@ echo -e "\n${BLUE}Step 4: Task Creation Failure Tests${NC}"
 
 expect_failure \
     "Creating task with non-existent project" \
-    '$CLI_CMD create-task "non-existent-project" "$TASK_TYPE_ID" "test instructions"' \
+    '$CLI_CMD create-task "non-existent-project" "$TASK_TYPE_ID" "test instructions" --vars "{\"var\": \"test\"}"' \
     "not found"
 
 expect_failure \
     "Creating task with invalid task type ID format" \
-    '$CLI_CMD create-task "$TEST_PROJECT" "invalid-type-id" "test instructions"' \
-    "Validation failed"
+    '$CLI_CMD create-task "$TEST_PROJECT" "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" "test instructions"' \
+    "not found"
 
 expect_failure \
     "Creating task with non-existent task type (valid GUID)" \
@@ -160,7 +165,7 @@ expect_failure \
 
 expect_failure \
     "Creating task with empty instructions" \
-    '$CLI_CMD create-task "$TEST_PROJECT" "$TASK_TYPE_ID" ""' \
+    '$CLI_CMD create-task "$TEST_PROJECT" "$TASK_TYPE_ID" "" --vars "{\"var\": \"test\"}"' \
     "Validation failed"
 
 expect_failure \
@@ -175,53 +180,38 @@ echo "✓ Valid task created for further tests: $TASK_ID"
 
 echo "✅ Task creation failure tests completed"
 
-# Step 5: Agent registration failures
-echo -e "\n${BLUE}Step 5: Agent Registration Failure Tests${NC}"
+# Step 5: Agent setup (lease-based model)
+echo -e "\n${BLUE}Step 5: Agent Setup${NC}"
 
-expect_failure \
-    "Registering agent with empty name" \
-    '$CLI_CMD register-agent "$TEST_PROJECT" ""' \
-    "Validation failed"
-
-expect_failure \
-    "Registering agent for non-existent project" \
-    '$CLI_CMD register-agent "non-existent-project" "test-agent"' \
-    "not found"
-
-# Register valid agent for further tests
-AGENT_OUTPUT=$($CLI_CMD register-agent "$TEST_PROJECT" "valid-agent")
+# In the lease-based model, agents don't need registration
+# They just need names for task assignment
 AGENT_NAME="valid-agent"
-echo "✓ Valid agent registered for further tests: $AGENT_NAME"
+echo "✓ Agent name prepared for further tests: $AGENT_NAME (no registration needed)"
 
-echo "✅ Agent registration failure tests completed"
+echo "✅ Agent setup completed"
 
 # Step 6: Task assignment and completion failures
 echo -e "\n${BLUE}Step 6: Task Operations Failure Tests${NC}"
 
 expect_failure \
-    "Getting task for non-existent agent" \
-    '$CLI_CMD get-next-task "non-existent-agent" "$TEST_PROJECT"' \
-    "not found"
-
-expect_failure \
     "Getting task for non-existent project" \
-    '$CLI_CMD get-next-task "$AGENT_NAME" "non-existent-project"' \
+    '$CLI_CMD get-next-task "non-existent-project" "$AGENT_NAME"' \
     "not found"
 
 expect_failure \
     "Completing non-existent task" \
-    '$CLI_CMD complete-task "$AGENT_NAME" "$TEST_PROJECT" "12345678-1234-4234-b234-123456789012"' \
+    '$CLI_CMD complete-task "$AGENT_NAME" "$TEST_PROJECT" "12345678-1234-4234-b234-123456789012" "test result"' \
     "not found"
 
 expect_failure \
     "Completing task with invalid result JSON" \
-    '$CLI_CMD complete-task "$AGENT_NAME" "$TEST_PROJECT" "$TASK_ID" --result "invalid-json"' \
-    "Invalid result JSON"
+    '$CLI_CMD complete-task "$AGENT_NAME" "$TEST_PROJECT" "$TASK_ID" "invalid-json"' \
+    "Invalid"
 
 expect_failure \
     "Failing task with invalid result JSON" \
-    '$CLI_CMD fail-task "$AGENT_NAME" "$TEST_PROJECT" "$TASK_ID" --result "invalid-json"' \
-    "Invalid result JSON"
+    '$CLI_CMD fail-task "$AGENT_NAME" "$TEST_PROJECT" "$TASK_ID" "invalid-json"' \
+    "Invalid"
 
 echo "✅ Task operation failure tests completed"
 
@@ -312,14 +302,13 @@ for i in {1..5}; do
 done
 echo "✓ Created ${#CONCURRENT_TASK_IDS[@]} tasks for concurrent testing"
 
-# Register multiple agents
-echo "🤖 Registering multiple agents..."
+# Prepare multiple agent names
+echo "🤖 Preparing multiple agent names..."
 CONCURRENT_AGENTS=()
 for i in {1..3}; do
-    AGENT_OUTPUT=$($CLI_CMD register-agent "$TEST_PROJECT" "concurrent-agent-$i" > /dev/null 2>&1)
     CONCURRENT_AGENTS+=("concurrent-agent-$i")
 done
-echo "✓ Registered ${#CONCURRENT_AGENTS[@]} agents"
+echo "✓ Prepared ${#CONCURRENT_AGENTS[@]} agent names"
 
 # Test concurrent task assignment
 echo "⚡ Testing concurrent task assignment..."
@@ -328,7 +317,7 @@ for agent in "${CONCURRENT_AGENTS[@]}"; do
     (
         # Each agent tries to get multiple tasks rapidly
         for attempt in {1..3}; do
-            $CLI_CMD get-next-task "$agent" "$TEST_PROJECT" > "/tmp/failure_concurrent_${agent}_${attempt}.out" 2>&1 || true
+            $CLI_CMD get-next-task "$TEST_PROJECT" "$agent" > "/tmp/failure_concurrent_${agent}_${attempt}.out" 2>&1 || true
             sleep 0.1
         done
     ) &
@@ -358,9 +347,9 @@ echo "✅ Concurrent access tests completed"
 echo -e "\n${BLUE}Step 10: Resource Exhaustion Tests${NC}"
 
 # Test with no available tasks
-expect_success \
+expect_failure \
     "Getting task when no tasks available" \
-    '$CLI_CMD get-next-task "$AGENT_NAME" "$TEST_PROJECT"' \
+    '$CLI_CMD get-next-task "$TEST_PROJECT" "$AGENT_NAME"' \
     "No tasks available"
 
 # Test statistics with empty project

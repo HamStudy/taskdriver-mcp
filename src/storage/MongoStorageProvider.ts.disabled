@@ -21,9 +21,8 @@ import {
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
-  Agent, 
-  AgentCreateInput, 
-  AgentUpdateInput,
+  TaskAssignmentResult,
+  AgentStatus,
   TaskAttempt,
   Session,
   SessionCreateInput,
@@ -854,7 +853,6 @@ export class MongoStorageProvider extends BaseStorageProvider {
       projectId: input.projectId,
       status: 'idle',
       apiKeyHash: input.apiKeyHash || '',
-      capabilities: input.capabilities || [],
       createdAt: now,
       lastSeen: now,
     };
@@ -939,7 +937,7 @@ export class MongoStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async completeTask(taskId: string, result: TaskResult): Promise<void> {
+  async completeTask(taskId: string, agentName: string, result: TaskResult): Promise<void> {
     this.ensureInitialized();
     const collections = this.ensureCollections();
     
@@ -1031,7 +1029,7 @@ export class MongoStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async failTask(taskId: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
+  async failTask(taskId: string, agentName: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
     this.ensureInitialized();
     const collections = this.ensureCollections();
     
@@ -1395,5 +1393,18 @@ export class MongoStorageProvider extends BaseStorageProvider {
     });
 
     return result.deletedCount || 0;
+  }
+
+  // Lease-based agent operations - stubs for now
+  async getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult> {
+    throw new Error('MongoStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
+  }
+
+  async listActiveAgents(projectId: string): Promise<AgentStatus[]> {
+    throw new Error('MongoStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
+  }
+
+  async getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null> {
+    throw new Error('MongoStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
   }
 }

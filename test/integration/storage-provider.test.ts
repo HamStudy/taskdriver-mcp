@@ -85,16 +85,9 @@ describe('Storage Provider Integration', () => {
       expect(taskType.projectId).toBe(project.id);
       expect(taskType.template).toBe('Process {{input}} with {{method}}');
 
-      // 3. Register an agent
-      const registration = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'integration-agent',
-        capabilities: ['processing', 'analysis']
-      });
-
-      expect(registration.agent.projectId).toBe(project.id);
-      expect(registration.agent.name).toBe('integration-agent');
-      const agent = registration.agent;
+      // 3. In the new lease-based model, agents are ephemeral and don't need registration
+      // They are created on-demand when getting tasks
+      const agentName = 'integration-agent';
 
       // 4. Create multiple tasks
       const task1 = await taskService.createTask({
@@ -115,17 +108,19 @@ describe('Storage Provider Integration', () => {
       expect(task2.status).toBe('queued');
 
       // 5. Agent gets next task
-      const assignedTask = await agentService.getNextTask(agent.name, project.id);
-      expect(assignedTask).not.toBeNull();
-      expect(assignedTask!.id).toBe(task1.id); // Should get first task (FIFO)
-      expect(assignedTask!.status).toBe('running');
-      expect(assignedTask!.assignedTo).toBe(agent.name);
+      const assignmentResult = await agentService.getNextTask(project.id, agentName);
+      expect(assignmentResult.task).not.toBeNull();
+      expect(assignmentResult.agentName).toBe(agentName);
+      const assignedTask = assignmentResult.task!;
+      expect(assignedTask.id).toBe(task1.id); // Should get first task (FIFO)
+      expect(assignedTask.status).toBe('running');
+      expect(assignedTask.assignedTo).toBe(agentName);
 
       // 6. Complete the task
       await agentService.completeTask(
-        agent.name,
+        agentName,
         project.id,
-        assignedTask!.id,
+        assignedTask.id,
         {
           success: true,
           output: 'Dataset processed successfully',
@@ -133,20 +128,21 @@ describe('Storage Provider Integration', () => {
         }
       );
 
-      const completedTask = await taskService.getTask(assignedTask!.id);
+      const completedTask = await taskService.getTask(assignedTask.id);
       expect(completedTask!.status).toBe('completed');
       expect(completedTask!.result!.success).toBe(true);
 
       // 7. Get next task
-      const assignedTask2 = await agentService.getNextTask(agent.name, project.id);
-      expect(assignedTask2).not.toBeNull();
-      expect(assignedTask2!.id).toBe(task2.id);
+      const assignmentResult2 = await agentService.getNextTask(project.id, agentName);
+      expect(assignmentResult2.task).not.toBeNull();
+      const assignedTask2 = assignmentResult2.task!;
+      expect(assignedTask2.id).toBe(task2.id);
 
       // 8. Fail the task (should retry)
       await agentService.failTask(
-        agent.name,
+        agentName,
         project.id,
-        assignedTask2!.id,
+        assignedTask2.id,
         {
           success: false,
           error: 'Temporary processing error',
@@ -154,21 +150,22 @@ describe('Storage Provider Integration', () => {
         }
       );
 
-      const failedTask = await taskService.getTask(assignedTask2!.id);
+      const failedTask = await taskService.getTask(assignedTask2.id);
       expect(failedTask!.status).toBe('queued'); // Should be requeued
       expect(failedTask!.retryCount).toBe(1);
 
       // 9. Get task again (retry)
-      const retryTask = await agentService.getNextTask(agent.name, project.id);
-      expect(retryTask).not.toBeNull();
-      expect(retryTask!.id).toBe(task2.id);
-      expect(retryTask!.retryCount).toBe(1);
+      const assignmentResult3 = await agentService.getNextTask(project.id, agentName);
+      expect(assignmentResult3.task).not.toBeNull();
+      const retryTask = assignmentResult3.task!;
+      expect(retryTask.id).toBe(task2.id);
+      expect(retryTask.retryCount).toBe(1);
 
       // 10. Complete the retry
       await agentService.completeTask(
-        agent.name,
+        agentName,
         project.id,
-        retryTask!.id,
+        retryTask.id,
         {
           success: true,
           output: 'Dataset processed on retry',
@@ -203,11 +200,7 @@ describe('Storage Provider Integration', () => {
         leaseDurationMinutes: 1 // 1 minute (minimum allowed)
       });
 
-      const agentReg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'lease-test-agent'
-      });
-      const agent = agentReg.agent;
+      const agentName = 'lease-test-agent';
 
       const task = await taskService.createTask({
         projectId: project.id,
@@ -219,12 +212,13 @@ describe('Storage Provider Integration', () => {
       });
 
       // Assign task
-      const assignedTask = await agentService.getNextTask(agent.name, project.id);
-      expect(assignedTask).not.toBeNull();
-      expect(assignedTask!.status).toBe('running');
+      const assignmentResult = await agentService.getNextTask(project.id, agentName);
+      expect(assignmentResult.task).not.toBeNull();
+      const assignedTask = assignmentResult.task!;
+      expect(assignedTask.status).toBe('running');
 
       // Manually expire the lease by setting it to past time
-      await storage.updateTask(assignedTask!.id, {
+      await storage.updateTask(assignedTask.id, {
         leaseExpiresAt: new Date(Date.now() - 60000) // 1 minute ago
       });
 
@@ -240,9 +234,10 @@ describe('Storage Provider Integration', () => {
       expect(reclaimedTask!.assignedTo).toBeUndefined();
 
       // Agent should be able to get the task again
-      const reassignedTask = await agentService.getNextTask(agent.name, project.id);
-      expect(reassignedTask).not.toBeNull();
-      expect(reassignedTask!.id).toBe(task.id);
+      const reassignmentResult = await agentService.getNextTask(project.id, agentName);
+      expect(reassignmentResult.task).not.toBeNull();
+      const reassignedTask = reassignmentResult.task!;
+      expect(reassignedTask.id).toBe(task.id);
     });
 
     it('should handle duplicate task detection', async () => {
@@ -309,53 +304,52 @@ describe('Storage Provider Integration', () => {
       const taskType = await taskTypeService.createTaskType({
         projectId: project.id,
         name: 'batch-task-type',
-        template: 'Execute batch task: {{instructions}}'
+        template: 'Execute batch task: {{instructions}}',
+        variables: ['instructions']
       });
 
-      const agentReg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'batch-agent'
-      });
-      const agent = agentReg.agent;
+      const agentName = 'batch-agent';
 
       // Create multiple tasks
       const batchTasks = Array.from({ length: 5 }, (_, i) => ({
-        typeId: taskType.id,
-        instructions: `Batch task ${i + 1}`,
-        variables: { index: (i + 1).toString() }
+        type: taskType.id,
+        vars: { 
+          instructions: `Batch task ${i + 1}` 
+        }
       }));
 
-      const batchResult = await storage.createTasksBulk(project.id, batchTasks);
+      const batchResult = await taskService.createTasksBulk(project.id, batchTasks);
       expect(batchResult.tasksCreated).toBe(5);
       expect(batchResult.errors).toHaveLength(0);
 
       // Process all tasks
       const completedTasks = [];
       for (let i = 0; i < 5; i++) {
-        const task = await agentService.getNextTask(agent.name, project.id);
-        expect(task).not.toBeNull();
+        const assignmentResult = await agentService.getNextTask(project.id, agentName);
+        expect(assignmentResult.task).not.toBeNull();
+        const task = assignmentResult.task!;
         
         await agentService.completeTask(
-          agent.name,
+          agentName,
           project.id,
-          task!.id,
+          task.id,
           { success: true, output: `Completed task ${i + 1}` }
         );
         
-        completedTasks.push(task!);
+        completedTasks.push(task);
       }
 
       // Verify no more tasks
-      const noMoreTasks = await agentService.getNextTask(agent.name, project.id);
-      expect(noMoreTasks).toBeNull();
+      const noMoreTasksResult = await agentService.getNextTask(project.id, agentName);
+      expect(noMoreTasksResult.task).toBeNull();
 
-      // Check batch status
-      const batchStatus = await storage.getBatchStatus(batchResult.batchId);
-      expect(batchStatus.total).toBe(5);
-      expect(batchStatus.completed).toBe(5);
-      expect(batchStatus.failed).toBe(0);
-      expect(batchStatus.queued).toBe(0);
-      expect(batchStatus.running).toBe(0);
+      // Verify final project state
+      const finalProject = await projectService.getProject(project.id);
+      expect(finalProject!.stats.totalTasks).toBe(5);
+      expect(finalProject!.stats.completedTasks).toBe(5);
+      expect(finalProject!.stats.failedTasks).toBe(0);
+      expect(finalProject!.stats.queuedTasks).toBe(0);
+      expect(finalProject!.stats.runningTasks).toBe(0);
     });
   });
 
@@ -372,11 +366,7 @@ describe('Storage Provider Integration', () => {
         template: 'Execute consistency task: {{instructions}}'
       });
 
-      const agentReg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'consistency-agent'
-      });
-      const agent = agentReg.agent;
+      const agentName = 'consistency-agent';
 
       // Create task via TaskService
       const task = await taskService.createTask({
@@ -389,13 +379,15 @@ describe('Storage Provider Integration', () => {
       });
 
       // Assign via AgentService
-      const assignedTask = await agentService.getNextTask(agent.name, project.id);
-      expect(assignedTask!.id).toBe(task.id);
+      const assignmentResult = await agentService.getNextTask(project.id, agentName);
+      expect(assignmentResult.task).not.toBeNull();
+      const assignedTask = assignmentResult.task!;
+      expect(assignedTask.id).toBe(task.id);
 
       // Verify consistency in TaskService
       const retrievedTask = await taskService.getTask(task.id);
       expect(retrievedTask!.status).toBe('running');
-      expect(retrievedTask!.assignedTo).toBe(agent.name);
+      expect(retrievedTask!.assignedTo).toBe(agentName);
 
       // Verify consistency in ProjectService stats
       const updatedProject = await projectService.getProject(project.id);
@@ -404,7 +396,7 @@ describe('Storage Provider Integration', () => {
 
       // Complete via AgentService
       await agentService.completeTask(
-        agent.name,
+        agentName,
         project.id,
         task.id,
         { success: true, output: 'Consistency verified' }
@@ -431,18 +423,9 @@ describe('Storage Provider Integration', () => {
         template: 'Execute concurrent task: {{instructions}}'
       });
 
-      // Register multiple agents
-      const agent1Reg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'agent-1'
-      });
-      const agent1 = agent1Reg.agent;
-
-      const agent2Reg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'agent-2'
-      });
-      const agent2 = agent2Reg.agent;
+      // Define agent names for concurrent operations
+      const agent1Name = 'agent-1';
+      const agent2Name = 'agent-2';
 
       // Create multiple tasks
       const tasks = await Promise.all([
@@ -467,35 +450,37 @@ describe('Storage Provider Integration', () => {
       ]);
 
       // Both agents try to get tasks simultaneously (test concurrent assignment)
-      const [assignedTask1, assignedTask2] = await Promise.all([
-        agentService.getNextTask(agent1.name, project.id),
-        agentService.getNextTask(agent2.name, project.id)
+      const [assignmentResult1, assignmentResult2] = await Promise.all([
+        agentService.getNextTask(project.id, agent1Name),
+        agentService.getNextTask(project.id, agent2Name)
       ]);
 
-      expect(assignedTask1).not.toBeNull();
-      expect(assignedTask2).not.toBeNull();
-      expect(assignedTask1!.id).not.toBe(assignedTask2!.id); // Different tasks
+      expect(assignmentResult1.task).not.toBeNull();
+      expect(assignmentResult2.task).not.toBeNull();
+      const assignedTask1 = assignmentResult1.task!;
+      const assignedTask2 = assignmentResult2.task!;
+      expect(assignedTask1.id).not.toBe(assignedTask2.id); // Different tasks
 
       // Complete tasks concurrently
       await Promise.all([
         agentService.completeTask(
-          agent1.name,
+          agent1Name,
           project.id,
-          assignedTask1!.id,
+          assignedTask1.id,
           { success: true, output: 'Agent 1 completed' }
         ),
         agentService.completeTask(
-          agent2.name,
+          agent2Name,
           project.id,
-          assignedTask2!.id,
+          assignedTask2.id,
           { success: true, output: 'Agent 2 completed' }
         )
       ]);
 
       // Verify both completed
       const [completedTask1, completedTask2] = await Promise.all([
-        taskService.getTask(assignedTask1!.id),
-        taskService.getTask(assignedTask2!.id)
+        taskService.getTask(assignedTask1.id),
+        taskService.getTask(assignedTask2.id)
       ]);
 
       expect(completedTask1!.status).toBe('completed');
@@ -524,23 +509,17 @@ describe('Storage Provider Integration', () => {
         variables: { instructions: 'This should fail' }
       })).rejects.toThrow(`Task type ${fakeTypeId} not found`);
 
-      // Try to register agent with non-existent project (but valid UUID format)
+      // Try to get task from non-existent project (but valid UUID format)
       const fakeProjectId = uuidv4();
-      await expect(agentService.registerAgent({
-        projectId: fakeProjectId,
-        name: 'test-agent'
-      })).rejects.toThrow(`Project ${fakeProjectId} not found`);
+      await expect(agentService.getNextTask(fakeProjectId, 'test-agent'))
+        .rejects.toThrow(`Project ${fakeProjectId} not found`);
 
       // Try to complete non-existent task
-      const agentReg = await agentService.registerAgent({
-        projectId: project.id,
-        name: 'error-agent'
-      });
-      const agent = agentReg.agent;
+      const agentName = 'error-agent';
 
       const fakeTaskId = uuidv4();
       await expect(agentService.completeTask(
-        agent.name,
+        agentName,
         project.id,
         fakeTaskId,
         { success: true, output: 'Should fail' }

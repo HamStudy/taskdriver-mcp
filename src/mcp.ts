@@ -9,12 +9,15 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { 
   ListToolsRequestSchema, 
-  CallToolRequestSchema 
+  CallToolRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadConfig } from './config/index.js';
 import { createStorageProvider } from './storage/index.js';
 import { tools } from './tools/generated.js';
 import { GeneratedToolHandlers } from './tools/generated.js';
+import { prompts, promptHandlers } from './prompts/index.js';
 
 export async function runMCPServer() {
   console.error('🚀 Starting TaskDriver MCP Server...');
@@ -40,6 +43,7 @@ export async function runMCPServer() {
     {
       capabilities: {
         tools: {},
+        prompts: {},
       },
     }
   );
@@ -56,12 +60,38 @@ export async function runMCPServer() {
     return await toolHandlers.handleToolCall(request);
   });
 
+  // Register prompts
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    const promptList = prompts();
+    return {
+      prompts: Object.values(promptList)
+    };
+  });
+
+  // Handle prompt requests
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    
+    const promptHandlerMap = promptHandlers();
+    const handler = promptHandlerMap[name];
+    if (!handler) {
+      throw new Error(`Unknown prompt: ${name}`);
+    }
+    
+    const result = handler(args || {} as any);
+    return {
+      description: `TaskDriver workflow prompt: ${name}`,
+      messages: result.messages
+    };
+  });
+
   // Connect to transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
   
   console.error('✅ TaskDriver MCP Server is running');
   console.error(`🔧 ${tools.length} tools registered`);
+  console.error(`📝 ${Object.keys(prompts()).length} prompts registered`);
   console.error('📡 Waiting for LLM agent connections...');
   
   // Graceful shutdown

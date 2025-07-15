@@ -68,7 +68,7 @@ bash test/e2e/failure-scenarios.sh
 1. ✅ System health check
 2. 🏗️ Create project with custom configuration
 3. 📝 Create task type with template and variables
-4. 🤖 Register agent with capabilities
+4. 🤖 Register agent
 5. 📋 Create multiple tasks with variables
 6. ⚡ Agent processes tasks (get → complete cycle)
 7. 📊 Verify final statistics and project state

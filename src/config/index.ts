@@ -41,6 +41,9 @@ export function loadConfig(): TaskDriverConfig {
       pretty: process.env.TASKDRIVER_LOG_PRETTY?.toLowerCase() === 'true',
       correlation: process.env.TASKDRIVER_LOG_CORRELATION?.toLowerCase() !== 'false',
     },
+    mcp: {
+      promptPrefix: process.env.TASKDRIVER_MCP_PROMPT_PREFIX,
+    },
     security: {
       enableAuth: process.env.TASKDRIVER_ENABLE_AUTH?.toLowerCase() !== 'false',
       apiKeyLength: process.env.TASKDRIVER_API_KEY_LENGTH 

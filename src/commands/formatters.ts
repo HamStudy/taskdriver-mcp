@@ -30,7 +30,7 @@ export function formatCommandResult(
   // Human-readable format
   if (!result.success) {
     return {
-      text: chalk.red(`❌ ${result.error || 'Command failed'}`),
+      text: chalk.red(`❌ Error: ${result.error || 'Command failed'}`),
       exitCode: 1
     };
   }
@@ -42,8 +42,10 @@ export function formatCommandResult(
     output += chalk.green(`✅ ${result.message}`) + '\n';
   }
 
-  if (result.data) {
-    output += formatData(result.data, commandName);
+  // For successful results, check for data property first, then fall back to result itself
+  const dataToFormat = result.data || result;
+  if (dataToFormat && typeof dataToFormat === 'object') {
+    output += formatData(dataToFormat, commandName);
   }
 
   return {
@@ -56,6 +58,38 @@ export function formatCommandResult(
  * Format data based on command type
  */
 function formatData(data: any, commandName: string): string {
+  // Handle specific data properties first
+  if (data.project) {
+    // Single project result - add success message for create-project
+    let output = '';
+    if (commandName.includes('create-project')) {
+      output += chalk.green('✅ Project created successfully') + '\n';
+    }
+    output += formatProject(data.project);
+    return output;
+  }
+
+  if (data.projects) {
+    // Project list result
+    if (data.projects.length === 0) {
+      return chalk.gray('No projects found');
+    }
+    return `Found ${data.projects.length} projects` + '\n' + formatProjectList(data.projects);
+  }
+
+  if (data.tasks) {
+    // Task list result  
+    if (data.tasks.length === 0) {
+      return chalk.gray('No tasks found');
+    }
+    return `Found ${data.tasks.length} tasks` + '\n' + formatTaskList(data.tasks);
+  }
+
+  if (data.status) {
+    // Health check result
+    return formatHealthCheck(data);
+  }
+
   // Handle array data (lists)
   if (Array.isArray(data)) {
     if (data.length === 0) {
@@ -98,7 +132,7 @@ function formatData(data: any, commandName: string): string {
  */
 function formatProject(project: any): string {
   let output = `\n${chalk.bold.blue(project.name)} (${project.id})\n`;
-  output += `${chalk.gray('Status:')} ${project.status === 'active' ? chalk.green(project.status) : chalk.yellow(project.status)}\n`;
+  output += `${chalk.gray('Status:')} ${project.status === 'active' ? chalk.green(project.status.toUpperCase()) : chalk.yellow(project.status.toUpperCase())}\n`;
   output += `${chalk.gray('Description:')} ${project.description || 'No description'}\n`;
   output += `${chalk.gray('Created:')} ${new Date(project.createdAt).toLocaleString()}\n`;
 
@@ -163,7 +197,7 @@ function formatTaskStatus(status: string): string {
     completed: chalk.green,
     failed: chalk.red
   };
-  return (colors[status] || chalk.gray)(status);
+  return (colors[status] || chalk.gray)(status.toUpperCase());
 }
 
 /**
@@ -184,7 +218,7 @@ function formatProjectList(projects: any[]): string {
   output += chalk.gray('-'.repeat(maxNameWidth + 8 + 8 + 30)) + '\n';
   
   for (const project of projects) {
-    const status = project.status === 'active' ? chalk.green('active') : chalk.yellow(project.status);
+    const status = project.status === 'active' ? chalk.green('ACTIVE') : chalk.yellow(project.status.toUpperCase());
     const tasks = project.stats ? `${project.stats.totalTasks}` : '0';
     const description = (project.description || 'No description').substring(0, 40);
     
@@ -270,21 +304,18 @@ function formatAgentList(agents: any[]): string {
   output += chalk.bold(
     'NAME'.padEnd(maxNameWidth) + ' | ' +
     'STATUS'.padEnd(10) + ' | ' +
-    'CAPABILITIES'.padEnd(20) + ' | ' +
     'LAST SEEN'
   ) + '\n';
-  output += chalk.gray('-'.repeat(maxNameWidth + 50)) + '\n';
+  output += chalk.gray('-'.repeat(maxNameWidth + 30)) + '\n';
   
   for (const agent of agents) {
     const status = agent.status === 'idle' ? chalk.green(agent.status) : 
                    agent.status === 'working' ? chalk.blue(agent.status) :
                    chalk.gray(agent.status);
-    const capabilities = agent.capabilities ? agent.capabilities.join(', ').substring(0, 18) : '-';
     const lastSeen = agent.lastSeen ? new Date(agent.lastSeen).toLocaleDateString() : 'Never';
     
     output += agent.name.padEnd(maxNameWidth) + ' | ' +
               status.padEnd(10) + ' | ' +
-              capabilities.padEnd(20) + ' | ' +
               lastSeen + '\n';
   }
   
@@ -332,13 +363,6 @@ function formatAgent(agent: any): string {
   output += `${chalk.gray('Status:')} ${agent.status === 'idle' ? chalk.green(agent.status) : chalk.blue(agent.status)}\n`;
   output += `${chalk.gray('Created:')} ${new Date(agent.createdAt).toLocaleString()}\n`;
 
-  if (agent.capabilities && agent.capabilities.length > 0) {
-    output += `\n${chalk.bold('Capabilities:')}\n`;
-    for (const capability of agent.capabilities) {
-      output += `  • ${capability}\n`;
-    }
-  }
-
   if (agent.apiKey) {
     output += `\n${chalk.bold.yellow('API Key:')} ${agent.apiKey}\n`;
     output += chalk.yellow('⚠️  Store this API key securely - it will not be shown again!\n');
@@ -353,11 +377,16 @@ function formatAgent(agent: any): string {
 function formatHealthCheck(data: any): string {
   const statusColor = data.status === 'healthy' ? chalk.green : chalk.red;
   let output = `\n${chalk.bold('System Status:')} ${statusColor(data.status.toUpperCase())}\n`;
-  output += `${chalk.gray('Timestamp:')} ${new Date(data.timestamp).toLocaleString()}\n`;
+  
+  if (data.timestamp) {
+    output += `${chalk.gray('Timestamp:')} ${new Date(data.timestamp).toLocaleString()}\n`;
+  }
 
   if (data.storage) {
     output += `\n${chalk.bold('Storage:')}\n`;
-    const storageStatus = data.storage.healthy ? chalk.green('✓ Healthy') : chalk.red('✗ Unhealthy');
+    // Handle both storage.healthy boolean and storage.status string formats
+    const isHealthy = data.storage.healthy === true || data.storage.status === 'healthy';
+    const storageStatus = isHealthy ? chalk.green('✓ Healthy') : chalk.red('✗ Unhealthy');
     output += `  Status: ${storageStatus}\n`;
     if (data.storage.message) {
       output += `  Message: ${data.storage.message}\n`;

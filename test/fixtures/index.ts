@@ -124,7 +124,6 @@ export const createMockAgent = (overrides?: Partial<Agent>): Agent => {
     apiKeyHash: 'hashed-api-key',
     lastSeen: new Date(),
     createdAt: new Date(),
-    capabilities: ['task1', 'task2'],
     ...overrides,
   };
 };
@@ -134,7 +133,6 @@ export const createMockAgentInput = (overrides?: Partial<AgentCreateInput>): Age
   return {
     name: 'test-agent',
     projectId,
-    capabilities: ['task1', 'task2'],
     ...overrides,
   };
 };

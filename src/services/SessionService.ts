@@ -4,7 +4,6 @@ import {
   Session, 
   SessionCreateInput, 
   SessionUpdateInput,
-  Agent,
   Project
 } from '../types/index.js';
 import type { StorageProvider } from '../storage/StorageProvider.js';
@@ -37,11 +36,8 @@ export class SessionService {
       resumeExisting?: boolean;
     }
   ): Promise<{ session: Session; sessionToken: string; resumed?: boolean }> {
-    // Verify agent exists
-    const agent = await this.agentService.getAgentStatus(agentName, projectId);
-    if (!agent) {
-      throw new Error(`Agent ${agentName} not found in project ${projectId}`);
-    }
+    // In the ephemeral agent model, agents don't need to exist in storage
+    // until they have active task leases - so we don't verify agent existence
 
     // Verify project exists
     const project = await this.projectService.getProject(projectId);
@@ -84,9 +80,9 @@ export class SessionService {
     const ttlSeconds = options?.ttlSeconds || this.sessionTimeoutSeconds;
     
     const session = await this.storage.createSession({
-      agentId: agent.id,
+      agentId: agentName, // Use agent name as ID in lease-based model
       projectId,
-      agentName: agent.name,
+      agentName: agentName,
       ttlSeconds,
       data: options?.data || {}
     });
@@ -125,7 +121,7 @@ export class SessionService {
    */
   async validateSession(sessionToken: string): Promise<{
     session: Session;
-    agent: Agent;
+    agent: any; // AgentStatus or null in lease-based model
     project: Project;
   } | null> {
     const session = await this.authenticateSession(sessionToken);
@@ -133,17 +129,19 @@ export class SessionService {
       return null;
     }
 
-    // Get agent and project info
+    // Get agent status and project info
     const [agent, project] = await Promise.all([
-      session.agentId ? this.agentService.getAgent(session.agentId) : null,
+      session.agentName && session.projectId ? this.agentService.getAgentStatus(session.agentName, session.projectId) : null,
       session.projectId ? this.projectService.getProject(session.projectId) : null
     ]);
 
-    if (!agent || !project) {
-      // Session references invalid agent or project, clean it up
+    if (!project) {
+      // Session references invalid project, clean it up
       await this.destroySession(sessionToken);
       return null;
     }
+    
+    // Note: agent can be null in lease-based model (agent not currently working)
 
     return { session, agent, project };
   }

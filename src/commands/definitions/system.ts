@@ -12,7 +12,7 @@ export const healthCheck: CommandDefinition<typeof healthCheckParams> = {
   name: 'healthCheck',
   mcpName: 'health_check',
   cliName: 'health-check',
-  description: 'Check system health',
+  description: 'Check TaskDriver system health including storage connectivity, resource availability, and system status. Use this to verify the system is operational before starting work or to troubleshoot issues.',
   parameters: healthCheckParams,
   async handler(context) {
     const healthStatus = await context.storage.healthCheck();
@@ -50,7 +50,7 @@ export const extendTaskLease: CommandDefinition<typeof extendTaskLeaseParams> = 
   name: 'extendTaskLease',
   mcpName: 'extend_task_lease',
   cliName: 'extend-task-lease',
-  description: 'Extend task lease duration',
+  description: 'Extend the lease duration for a long-running task to prevent it from being reassigned to another agent. Use this when tasks take longer than expected to prevent timeout-based reassignment.',
   parameters: extendTaskLeaseParams,
   async handler(context, args) {
     await context.lease.extendTaskLease(args.taskId, args.extensionMinutes);
@@ -85,7 +85,7 @@ export const getLeaseStats: CommandDefinition<typeof getLeaseStatsParams> = {
   name: 'getLeaseStats',
   mcpName: 'get_lease_stats',
   cliName: 'get-lease-stats',
-  description: 'Get lease statistics',
+  description: 'Get statistics about task leases including active leases, expired leases, and lease duration metrics. Use this to monitor system performance, identify stuck tasks, or analyze task execution patterns.',
   parameters: getLeaseStatsParams,
   async handler(context, args) {
     // Find project
@@ -126,7 +126,7 @@ export const cleanupExpiredLeases: CommandDefinition<typeof cleanupExpiredLeases
   name: 'cleanupExpiredLeases',
   mcpName: 'cleanup_expired_leases',
   cliName: 'cleanup-leases',
-  description: 'Clean up expired leases',
+  description: 'Clean up expired task leases and make abandoned tasks available for reassignment. Use this to recover from agent failures, clean up stuck tasks, or perform maintenance on the task queue.',
   parameters: cleanupExpiredLeasesParams,
   async handler(context, args) {
     // Find project

@@ -7,7 +7,7 @@ import { TaskTypeService } from '../../src/services/TaskTypeService.js';
 import { FileStorageProvider } from '../../src/storage/FileStorageProvider.js';
 import { createTestDataDir } from '../fixtures/index.js';
 
-describe('AgentService', () => {
+describe('AgentService (Lease-based)', () => {
   let storage: FileStorageProvider;
   let agentService: AgentService;
   let projectService: ProjectService;
@@ -29,7 +29,7 @@ describe('AgentService', () => {
     // Create test project
     const project = await projectService.createProject({
       name: 'test-project',
-      description: 'Test project for agents'
+      description: 'Test project for lease-based agents'
     });
     projectId = project.id;
   });
@@ -41,170 +41,10 @@ describe('AgentService', () => {
     }
   });
 
-  describe('registerAgent', () => {
-    it('should register agent with name', async () => {
-      const input = {
-        projectId,
-        name: 'test-agent',
-        capabilities: ['testing', 'automation']
-      };
-
-      const result = await agentService.registerAgent(input);
-
-      expect(result.agent.id).toBeDefined();
-      expect(result.agent.name).toBe('test-agent');
-      expect(result.agent.projectId).toBe(projectId);
-      expect(result.agent.capabilities).toEqual(['testing', 'automation']);
-      expect(result.agent.status).toBe('idle');
-      expect(result.agent.createdAt).toBeInstanceOf(Date);
-      expect(result.agent.lastSeen).toBeInstanceOf(Date);
-      expect(result.apiKey).toBeDefined();
-      expect(result.apiKey).toHaveLength(32); // Default API key length
-    });
-
-    it('should auto-generate name when not provided', async () => {
-      const input = {
-        projectId,
-        capabilities: ['testing']
-      };
-
-      const result = await agentService.registerAgent(input);
-
-      expect(result.agent.name).toBeDefined();
-      expect(result.agent.name).toMatch(/^agent-\d+$/);
-    });
-
-    it('should register agent with minimal input', async () => {
-      const input = {
-        projectId
-      };
-
-      const result = await agentService.registerAgent(input);
-
-      expect(result.agent.capabilities).toEqual([]);
-      expect(result.agent.name).toMatch(/^agent-\d+$/);
-    });
-
-    it('should throw validation error for invalid input', async () => {
-      const input = {
-        projectId,
-        name: 'invalid name with spaces' // Invalid name format
-      };
-
-      await expect(agentService.registerAgent(input))
-        .rejects.toThrow('Validation failed');
-    });
-
-    it('should throw validation error for invalid project ID format', async () => {
-      const input = {
-        projectId: 'non-existent-project',
-        name: 'test-agent'
-      };
-
-      await expect(agentService.registerAgent(input))
-        .rejects.toThrow('Validation failed');
-    });
-
-    it('should allow duplicate agent names in same project', async () => {
-      const input = {
-        projectId,
-        name: 'duplicate-agent'
-      };
-
-      const agent1 = await agentService.registerAgent(input);
-      const agent2 = await agentService.registerAgent(input);
-
-      expect(agent1.agent.name).toBe('duplicate-agent');
-      expect(agent2.agent.name).toBe('duplicate-agent');
-      expect(agent1.agent.id).not.toBe(agent2.agent.id); // Should have different IDs
-    });
-
-    it('should allow same agent name in different projects', async () => {
-      const secondProject = await projectService.createProject({
-        name: 'second-project',
-        description: 'Second test project'
-      });
-
-      const input1 = {
-        projectId,
-        name: 'shared-name'
-      };
-
-      const input2 = {
-        projectId: secondProject.id,
-        name: 'shared-name'
-      };
-
-      const result1 = await agentService.registerAgent(input1);
-      const result2 = await agentService.registerAgent(input2);
-
-      expect(result1.agent.name).toBe('shared-name');
-      expect(result2.agent.name).toBe('shared-name');
-      expect(result1.agent.projectId).toBe(projectId);
-      expect(result2.agent.projectId).toBe(secondProject.id);
-    });
-  });
-
-  describe('authenticateAgent', () => {
-    let agentApiKey: string;
-
-    beforeEach(async () => {
-      const result = await agentService.registerAgent({
-        projectId,
-        name: 'auth-agent'
-      });
-      agentApiKey = result.apiKey;
-    });
-
-    it('should authenticate agent with valid API key', async () => {
-      const agent = await agentService.authenticateAgent(agentApiKey, projectId);
-
-      expect(agent.name).toBe('auth-agent');
-      expect(agent.projectId).toBe(projectId);
-    });
-
-    it('should throw error for invalid API key', async () => {
-      await expect(agentService.authenticateAgent('invalid-api-key', projectId))
-        .rejects.toThrow('Invalid API key or agent not found');
-    });
-
-    it('should throw error for disabled agent', async () => {
-      // Disable the agent
-      const agents = await agentService.listAgents(projectId);
-      const agent = agents.find(a => a.name === 'auth-agent')!;
-      await agentService.disableAgent(agent.id);
-
-      await expect(agentService.authenticateAgent(agentApiKey, projectId))
-        .rejects.toThrow('Agent is disabled');
-    });
-
-    it('should update last seen timestamp on authentication', async () => {
-      const agentBefore = await agentService.authenticateAgent(agentApiKey, projectId);
-      const lastSeenBefore = agentBefore.lastSeen;
-
-      // Wait a bit to ensure timestamp difference
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      const agentAfter = await agentService.authenticateAgent(agentApiKey, projectId);
-      const lastSeenAfter = agentAfter.lastSeen;
-
-      expect(lastSeenAfter.getTime()).toBeGreaterThanOrEqual(lastSeenBefore.getTime());
-    });
-  });
-
   describe('getNextTask', () => {
-    let agentName: string;
     let taskTypeId: string;
 
     beforeEach(async () => {
-      agentName = 'task-agent';
-      
-      // Register agent
-      await agentService.registerAgent({
-        projectId,
-        name: agentName
-      });
-
       // Create task type and tasks
       const taskType = await taskTypeService.createTaskType({
         projectId,
@@ -228,69 +68,76 @@ describe('AgentService', () => {
       });
     });
 
-    it('should get next task for agent', async () => {
-      const task = await agentService.getNextTask(agentName, projectId);
+    it('should get next task with provided agent name', async () => {
+      const result = await agentService.getNextTask(projectId, 'test-agent');
 
-      expect(task).not.toBeNull();
-      expect(task!.status).toBe('running');
-      expect(task!.assignedTo).toBe(agentName);
-      expect(task!.assignedAt).toBeInstanceOf(Date);
-      expect(task!.leaseExpiresAt).toBeInstanceOf(Date);
-
-      // Check that agent status was updated
-      const agent = await storage.getAgentByName(agentName, projectId);
-      expect(agent!.status).toBe('working');
-      expect(agent!.currentTaskId).toBe(task!.id);
+      expect(result.task).not.toBeNull();
+      expect(result.agentName).toBe('test-agent');
+      expect(result.task!.status).toBe('running');
+      expect(result.task!.assignedTo).toBe('test-agent');
+      expect(result.task!.assignedAt).toBeInstanceOf(Date);
+      expect(result.task!.leaseExpiresAt).toBeInstanceOf(Date);
+      expect(result.task!.leaseExpiresAt!.getTime()).toBeGreaterThan(Date.now());
     });
 
-    it('should return null when no tasks available', async () => {
-      // Register additional agents
-      await agentService.registerAgent({
-        projectId,
-        name: 'other-agent'
-      });
-      
-      await agentService.registerAgent({
-        projectId,
-        name: 'third-agent'
-      });
+    it('should get next task with auto-generated agent name', async () => {
+      const result = await agentService.getNextTask(projectId);
 
-      // Assign all tasks first
-      await agentService.getNextTask(agentName, projectId);
-      await agentService.getNextTask('other-agent', projectId);
-
-      const task = await agentService.getNextTask('third-agent', projectId);
-      expect(task).toBeNull();
+      expect(result.task).not.toBeNull();
+      expect(result.agentName).toBeDefined();
+      expect(result.agentName).toMatch(/^agent-\d+-[a-z0-9]+$/);
+      expect(result.task!.status).toBe('running');
+      expect(result.task!.assignedTo).toBe(result.agentName);
+      expect(result.task!.assignedAt).toBeInstanceOf(Date);
+      expect(result.task!.leaseExpiresAt).toBeInstanceOf(Date);
     });
 
-    it('should throw error for non-existent agent', async () => {
-      await expect(agentService.getNextTask('non-existent-agent', projectId))
-        .rejects.toThrow('Agent non-existent-agent not found in project');
+    it('should return null task when no tasks available', async () => {
+      // Assign all available tasks first
+      await agentService.getNextTask(projectId, 'agent-1');
+      await agentService.getNextTask(projectId, 'agent-2');
+
+      const result = await agentService.getNextTask(projectId, 'agent-3');
+      expect(result.task).toBeNull();
+      expect(result.agentName).toBe('agent-3');
     });
 
-    it('should throw error for disabled agent', async () => {
-      const agents = await agentService.listAgents(projectId);
-      const agent = agents.find(a => a.name === agentName)!;
-      await agentService.disableAgent(agent.id);
+    it('should resume existing task for agent with active lease', async () => {
+      // First assignment
+      const result1 = await agentService.getNextTask(projectId, 'persistent-agent');
+      const firstTaskId = result1.task!.id;
 
-      await expect(agentService.getNextTask(agentName, projectId))
-        .rejects.toThrow('Agent task-agent is disabled');
+      // Second call with same agent should resume the same task
+      const result2 = await agentService.getNextTask(projectId, 'persistent-agent');
+      expect(result2.task!.id).toBe(firstTaskId);
+      expect(result2.agentName).toBe('persistent-agent');
+    });
+
+    it('should throw error for non-existent project', async () => {
+      await expect(agentService.getNextTask('non-existent-project', 'test-agent'))
+        .rejects.toThrow();
+    });
+
+    it('should assign different tasks to different agents', async () => {
+      const result1 = await agentService.getNextTask(projectId, 'agent-1');
+      const result2 = await agentService.getNextTask(projectId, 'agent-2');
+
+      expect(result1.task).not.toBeNull();
+      expect(result2.task).not.toBeNull();
+      expect(result1.task!.id).not.toBe(result2.task!.id);
+      expect(result1.agentName).toBe('agent-1');
+      expect(result2.agentName).toBe('agent-2');
     });
   });
 
   describe('completeTask', () => {
-    let agentName: string;
     let taskId: string;
+    let agentName: string;
 
     beforeEach(async () => {
       agentName = 'complete-agent';
       
-      // Register agent and create task
-      await agentService.registerAgent({
-        projectId,
-        name: agentName
-      });
-
+      // Create task and assign it to agent
       const taskType = await taskTypeService.createTaskType({
         projectId,
         name: 'complete-task-type',
@@ -306,14 +153,14 @@ describe('AgentService', () => {
       taskId = task.id;
 
       // Assign the task
-      await agentService.getNextTask(agentName, projectId);
+      await agentService.getNextTask(projectId, agentName);
     });
 
     it('should complete task successfully', async () => {
       const taskResult = {
         success: true,
         output: 'Task completed successfully',
-        metadata: { key: 'value' }
+        duration: 1500
       };
 
       await agentService.completeTask(agentName, projectId, taskId, taskResult);
@@ -323,47 +170,52 @@ describe('AgentService', () => {
       expect(task!.status).toBe('completed');
       expect(task!.result).toEqual(taskResult);
       expect(task!.completedAt).toBeInstanceOf(Date);
-
-      // Check agent status
-      const agent = await storage.getAgentByName(agentName, projectId);
-      expect(agent!.status).toBe('idle');
-      expect(agent!.currentTaskId).toBeUndefined();
+      expect(task!.assignedTo).toBeUndefined(); // Lease should be released
+      expect(task!.leaseExpiresAt).toBeUndefined();
     });
 
-    it('should throw error for non-existent agent', async () => {
-      const taskResult = { success: true, output: 'test' };
+    it('should complete task with minimal result', async () => {
+      const taskResult = {
+        success: true
+      };
 
-      await expect(agentService.completeTask('non-existent-agent', projectId, taskId, taskResult))
-        .rejects.toThrow('Agent non-existent-agent not found in project');
+      await agentService.completeTask(agentName, projectId, taskId, taskResult);
+
+      const task = await taskService.getTask(taskId);
+      expect(task!.status).toBe('completed');
+      expect(task!.result).toEqual(taskResult);
     });
 
     it('should throw error for task not assigned to agent', async () => {
-      // Register another agent
-      await agentService.registerAgent({
-        projectId,
-        name: 'other-agent'
-      });
-
       const taskResult = { success: true, output: 'test' };
 
       await expect(agentService.completeTask('other-agent', projectId, taskId, taskResult))
-        .rejects.toThrow('is not assigned to agent other-agent');
+        .rejects.toThrow();
+    });
+
+    it('should throw error for non-existent task', async () => {
+      const taskResult = { success: true, output: 'test' };
+
+      await expect(agentService.completeTask(agentName, projectId, 'non-existent-task', taskResult))
+        .rejects.toThrow();
+    });
+
+    it('should throw error for non-existent project', async () => {
+      const taskResult = { success: true, output: 'test' };
+
+      await expect(agentService.completeTask(agentName, 'non-existent-project', taskId, taskResult))
+        .rejects.toThrow();
     });
   });
 
   describe('failTask', () => {
-    let agentName: string;
     let taskId: string;
+    let agentName: string;
 
     beforeEach(async () => {
       agentName = 'fail-agent';
       
-      // Register agent and create task
-      await agentService.registerAgent({
-        projectId,
-        name: agentName
-      });
-
+      // Create task and assign it to agent
       const taskType = await taskTypeService.createTaskType({
         projectId,
         name: 'fail-task-type',
@@ -379,14 +231,14 @@ describe('AgentService', () => {
       taskId = task.id;
 
       // Assign the task
-      await agentService.getNextTask(agentName, projectId);
+      await agentService.getNextTask(projectId, agentName);
     });
 
     it('should fail task with retry', async () => {
       const taskResult = {
         success: false,
         error: 'Task failed with error',
-        canRetry: true
+        explanation: 'Transient network error'
       };
 
       await agentService.failTask(agentName, projectId, taskId, taskResult, true);
@@ -395,18 +247,15 @@ describe('AgentService', () => {
       const task = await taskService.getTask(taskId);
       expect(task!.status).toBe('queued');
       expect(task!.retryCount).toBe(1);
-
-      // Check agent status
-      const agent = await storage.getAgentByName(agentName, projectId);
-      expect(agent!.status).toBe('idle');
-      expect(agent!.currentTaskId).toBeUndefined();
+      expect(task!.assignedTo).toBeUndefined(); // Lease should be released
+      expect(task!.leaseExpiresAt).toBeUndefined();
     });
 
     it('should fail task without retry', async () => {
       const taskResult = {
         success: false,
         error: 'Fatal error',
-        canRetry: false
+        explanation: 'Permanent failure'
       };
 
       await agentService.failTask(agentName, projectId, taskId, taskResult, false);
@@ -416,221 +265,281 @@ describe('AgentService', () => {
       expect(task!.status).toBe('failed');
       expect(task!.result).toEqual(taskResult);
       expect(task!.failedAt).toBeInstanceOf(Date);
+      expect(task!.assignedTo).toBeUndefined();
+      expect(task!.leaseExpiresAt).toBeUndefined();
     });
 
-    it('should throw error for non-existent agent', async () => {
+    it('should use default canRetry=true when not specified', async () => {
+      const taskResult = {
+        success: false,
+        error: 'Default retry test'
+      };
+
+      await agentService.failTask(agentName, projectId, taskId, taskResult);
+
+      const task = await taskService.getTask(taskId);
+      expect(task!.status).toBe('queued'); // Should be retried by default
+      expect(task!.retryCount).toBe(1);
+    });
+
+    it('should throw error for task not assigned to agent', async () => {
       const taskResult = { success: false, error: 'test' };
 
-      await expect(agentService.failTask('non-existent-agent', projectId, taskId, taskResult))
-        .rejects.toThrow('Agent non-existent-agent not found in project');
-    });
-  });
-
-  describe('updateAgentStatus', () => {
-    let agentName: string;
-
-    beforeEach(async () => {
-      agentName = 'status-agent';
-      await agentService.registerAgent({
-        projectId,
-        name: agentName
-      });
+      await expect(agentService.failTask('other-agent', projectId, taskId, taskResult))
+        .rejects.toThrow();
     });
 
-    it('should update agent status', async () => {
-      const updatedAgent = await agentService.updateAgentStatus(agentName, projectId, 'disabled');
+    it('should throw error for non-existent task', async () => {
+      const taskResult = { success: false, error: 'test' };
 
-      expect(updatedAgent.status).toBe('disabled');
-      expect(updatedAgent.lastSeen).toBeInstanceOf(Date);
-    });
-
-    it('should throw error for non-existent agent', async () => {
-      await expect(agentService.updateAgentStatus('non-existent-agent', projectId, 'disabled'))
-        .rejects.toThrow('Agent non-existent-agent not found in project');
-    });
-  });
-
-  describe('listAgents', () => {
-    beforeEach(async () => {
-      // Create test agents
-      await agentService.registerAgent({
-        projectId,
-        name: 'agent-1',
-        capabilities: ['testing']
-      });
-
-      await agentService.registerAgent({
-        projectId,
-        name: 'agent-2',
-        capabilities: ['automation']
-      });
-
-      // Create agent in different project
-      const otherProject = await projectService.createProject({
-        name: 'other-project',
-        description: 'Other project'
-      });
-
-      await agentService.registerAgent({
-        projectId: otherProject.id,
-        name: 'other-agent'
-      });
-    });
-
-    it('should list agents for specific project', async () => {
-      const agents = await agentService.listAgents(projectId);
-
-      expect(agents).toHaveLength(2);
-      expect(agents.every(a => a.projectId === projectId)).toBe(true);
-      expect(agents.map(a => a.name)).toContain('agent-1');
-      expect(agents.map(a => a.name)).toContain('agent-2');
-    });
-
-    it('should return empty array for project with no agents', async () => {
-      const emptyProject = await projectService.createProject({
-        name: 'empty-project',
-        description: 'Project with no agents'
-      });
-
-      const agents = await agentService.listAgents(emptyProject.id);
-      expect(agents).toHaveLength(0);
+      await expect(agentService.failTask(agentName, projectId, 'non-existent-task', taskResult))
+        .rejects.toThrow();
     });
 
     it('should throw error for non-existent project', async () => {
-      await expect(agentService.listAgents('non-existent-project'))
-        .rejects.toThrow('Project non-existent-project not found');
+      const taskResult = { success: false, error: 'test' };
+
+      await expect(agentService.failTask(agentName, 'non-existent-project', taskId, taskResult))
+        .rejects.toThrow();
     });
   });
 
-  describe('updateAgent', () => {
-    let agentId: string;
-
+  describe('listActiveAgents', () => {
     beforeEach(async () => {
-      const result = await agentService.registerAgent({
-        projectId,
-        name: 'update-agent',
-        capabilities: ['original']
-      });
-      agentId = result.agent.id;
-    });
-
-    it('should update agent name', async () => {
-      const updated = await agentService.updateAgent(agentId, {
-        name: 'updated-agent'
-      });
-
-      expect(updated.name).toBe('updated-agent');
-    });
-
-    it('should update agent capabilities', async () => {
-      const updated = await agentService.updateAgent(agentId, {
-        capabilities: ['new', 'capabilities']
-      });
-
-      expect(updated.capabilities).toEqual(['new', 'capabilities']);
-    });
-
-    it('should throw error for duplicate name within project', async () => {
-      await agentService.registerAgent({
-        projectId,
-        name: 'existing-agent'
-      });
-
-      await expect(agentService.updateAgent(agentId, { name: 'existing-agent' }))
-        .rejects.toThrow('Agent with name \'existing-agent\' already exists in project');
-    });
-
-    it('should throw error for non-existent agent', async () => {
-      await expect(agentService.updateAgent('non-existent-id', { name: 'test' }))
-        .rejects.toThrow('Agent non-existent-id not found');
-    });
-  });
-
-  describe('disableAgent', () => {
-    let agentId: string;
-
-    beforeEach(async () => {
-      const result = await agentService.registerAgent({
-        projectId,
-        name: 'disable-agent'
-      });
-      agentId = result.agent.id;
-    });
-
-    it('should disable idle agent', async () => {
-      const disabled = await agentService.disableAgent(agentId);
-      expect(disabled.status).toBe('disabled');
-    });
-
-    it('should throw error when disabling working agent', async () => {
-      // Make agent work on a task
+      // Create tasks for testing
       const taskType = await taskTypeService.createTaskType({
         projectId,
-        name: 'disable-task-type',
-        template: 'Disable task for {{resource}}'
+        name: 'list-agent-task-type',
+        template: 'List agent task for {{resource}}'
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Disable test task',
-        variables: { resource: 'test-resource' }
-      });
-
-      await agentService.getNextTask('disable-agent', projectId);
-
-      await expect(agentService.disableAgent(agentId))
-        .rejects.toThrow('Cannot disable agent');
-    });
-
-    it('should throw error for non-existent agent', async () => {
-      await expect(agentService.disableAgent('non-existent-id'))
-        .rejects.toThrow('Agent non-existent-id not found');
-    });
-  });
-
-  describe('deleteAgent', () => {
-    let agentId: string;
-
-    beforeEach(async () => {
-      const result = await agentService.registerAgent({
-        projectId,
-        name: 'delete-agent'
-      });
-      agentId = result.agent.id;
-    });
-
-    it('should delete idle agent', async () => {
-      await agentService.deleteAgent(agentId);
-
-      const deleted = await agentService.getAgent(agentId);
-      expect(deleted).toBeNull();
-    });
-
-    it('should throw error when deleting working agent', async () => {
-      // Make agent work on a task
-      const taskType = await taskTypeService.createTaskType({
-        projectId,
-        name: 'delete-task-type',
-        template: 'Delete task for {{resource}}'
+        instructions: 'Task 1',
+        variables: { resource: 'resource-1' }
       });
 
       await taskService.createTask({
         projectId,
         typeId: taskType.id,
-        instructions: 'Delete test task',
-        variables: { resource: 'test-resource' }
+        instructions: 'Task 2',
+        variables: { resource: 'resource-2' }
       });
-
-      await agentService.getNextTask('delete-agent', projectId);
-
-      await expect(agentService.deleteAgent(agentId))
-        .rejects.toThrow('Cannot delete agent');
     });
 
-    it('should throw error for non-existent agent', async () => {
-      await expect(agentService.deleteAgent('non-existent-id'))
-        .rejects.toThrow('Agent non-existent-id not found');
+    it('should list active agents with leased tasks', async () => {
+      // Assign tasks to agents
+      await agentService.getNextTask(projectId, 'agent-1');
+      await agentService.getNextTask(projectId, 'agent-2');
+
+      const activeAgents = await agentService.listActiveAgents(projectId);
+
+      expect(activeAgents).toHaveLength(2);
+      expect(activeAgents.map(a => a.name)).toContain('agent-1');
+      expect(activeAgents.map(a => a.name)).toContain('agent-2');
+      expect(activeAgents.every(a => a.status === 'working')).toBe(true);
+      expect(activeAgents.every(a => a.currentTaskId)).toBeTruthy();
+      expect(activeAgents.every(a => a.assignedAt instanceof Date)).toBe(true);
+    });
+
+    it('should return empty array when no agents are active', async () => {
+      const activeAgents = await agentService.listActiveAgents(projectId);
+      expect(activeAgents).toHaveLength(0);
+    });
+
+    it('should not include agents after task completion', async () => {
+      // Assign task to agent
+      const result = await agentService.getNextTask(projectId, 'temp-agent');
+      const taskId = result.task!.id;
+
+      // Verify agent is active
+      let activeAgents = await agentService.listActiveAgents(projectId);
+      expect(activeAgents).toHaveLength(1);
+      expect(activeAgents[0].name).toBe('temp-agent');
+
+      // Complete the task
+      await agentService.completeTask('temp-agent', projectId, taskId, { success: true });
+
+      // Verify agent is no longer active
+      activeAgents = await agentService.listActiveAgents(projectId);
+      expect(activeAgents).toHaveLength(0);
+    });
+
+    it('should throw error for non-existent project', async () => {
+      await expect(agentService.listActiveAgents('non-existent-project'))
+        .rejects.toThrow();
+    });
+  });
+
+  describe('getAgentStatus', () => {
+    let taskId: string;
+
+    beforeEach(async () => {
+      // Create task for testing
+      const taskType = await taskTypeService.createTaskType({
+        projectId,
+        name: 'status-task-type',
+        template: 'Status task for {{resource}}'
+      });
+
+      const task = await taskService.createTask({
+        projectId,
+        typeId: taskType.id,
+        instructions: 'Status test task',
+        variables: { resource: 'status-resource' }
+      });
+      taskId = task.id;
+    });
+
+    it('should get status for agent with active lease', async () => {
+      await agentService.getNextTask(projectId, 'status-agent');
+
+      const status = await agentService.getAgentStatus('status-agent', projectId);
+
+      expect(status).not.toBeNull();
+      expect(status!.name).toBe('status-agent');
+      expect(status!.projectId).toBe(projectId);
+      expect(status!.status).toBe('working');
+      expect(status!.currentTaskId).toBe(taskId);
+      expect(status!.assignedAt).toBeInstanceOf(Date);
+    });
+
+    it('should return null for agent without active lease', async () => {
+      const status = await agentService.getAgentStatus('inactive-agent', projectId);
+      expect(status).toBeNull();
+    });
+
+    it('should return null after task completion', async () => {
+      await agentService.getNextTask(projectId, 'temp-status-agent');
+      
+      // Complete the task
+      await agentService.completeTask('temp-status-agent', projectId, taskId, { success: true });
+
+      const status = await agentService.getAgentStatus('temp-status-agent', projectId);
+      expect(status).toBeNull();
+    });
+
+    it('should throw error for non-existent project', async () => {
+      await expect(agentService.getAgentStatus('test-agent', 'non-existent-project'))
+        .rejects.toThrow();
+    });
+  });
+
+  describe('extendTaskLease', () => {
+    let taskId: string;
+    let agentName: string;
+
+    beforeEach(async () => {
+      agentName = 'lease-agent';
+      
+      // Create task and assign it to agent
+      const taskType = await taskTypeService.createTaskType({
+        projectId,
+        name: 'lease-task-type',
+        template: 'Lease task for {{resource}}'
+      });
+
+      const task = await taskService.createTask({
+        projectId,
+        typeId: taskType.id,
+        instructions: 'Task with lease extension',
+        variables: { resource: 'lease-resource' }
+      });
+      taskId = task.id;
+
+      // Assign the task
+      await agentService.getNextTask(projectId, agentName);
+    });
+
+    it('should extend task lease successfully', async () => {
+      // Get original lease expiration
+      const taskBefore = await taskService.getTask(taskId);
+      const originalExpiry = taskBefore!.leaseExpiresAt!;
+
+      // Extend lease by 30 minutes
+      await agentService.extendTaskLease(taskId, agentName, 30);
+
+      // Check that lease was extended
+      const taskAfter = await taskService.getTask(taskId);
+      const newExpiry = taskAfter!.leaseExpiresAt!;
+      
+      const expectedMinimumExtension = 25 * 60 * 1000; // 25 minutes in ms (allowing for processing time)
+      expect(newExpiry.getTime() - originalExpiry.getTime()).toBeGreaterThan(expectedMinimumExtension);
+    });
+
+    it('should throw error for task not assigned to agent', async () => {
+      await expect(agentService.extendTaskLease(taskId, 'other-agent', 30))
+        .rejects.toThrow(`Task ${taskId} is not assigned to agent other-agent`);
+    });
+
+    it('should throw error for non-existent task', async () => {
+      await expect(agentService.extendTaskLease('non-existent-task', agentName, 30))
+        .rejects.toThrow('Task non-existent-task not found');
+    });
+
+    it('should throw error for completed task', async () => {
+      // Complete the task first
+      await agentService.completeTask(agentName, projectId, taskId, { success: true });
+
+      await expect(agentService.extendTaskLease(taskId, agentName, 30))
+        .rejects.toThrow(`Task ${taskId} is not assigned to agent ${agentName}`);
+    });
+
+    it('should work with different extension durations', async () => {
+      const taskBefore = await taskService.getTask(taskId);
+      const originalExpiry = taskBefore!.leaseExpiresAt!;
+
+      // Extend lease by 60 minutes
+      await agentService.extendTaskLease(taskId, agentName, 60);
+
+      const taskAfter = await taskService.getTask(taskId);
+      const newExpiry = taskAfter!.leaseExpiresAt!;
+      
+      const expectedMinimumExtension = 55 * 60 * 1000; // 55 minutes in ms
+      expect(newExpiry.getTime() - originalExpiry.getTime()).toBeGreaterThan(expectedMinimumExtension);
+    });
+  });
+
+  describe('edge cases and error handling', () => {
+    it('should handle concurrent task assignment properly', async () => {
+      // Create a single task
+      const taskType = await taskTypeService.createTaskType({
+        projectId,
+        name: 'concurrent-task-type',
+        template: 'Concurrent task for {{resource}}'
+      });
+
+      await taskService.createTask({
+        projectId,
+        typeId: taskType.id,
+        instructions: 'Single task for concurrency test',
+        variables: { resource: 'concurrent-resource' }
+      });
+
+      // Try to assign the same task to multiple agents simultaneously
+      const assignments = await Promise.all([
+        agentService.getNextTask(projectId, 'agent-1'),
+        agentService.getNextTask(projectId, 'agent-2'),
+        agentService.getNextTask(projectId, 'agent-3')
+      ]);
+
+      // Only one should get the task, others should get null
+      const successfulAssignments = assignments.filter(a => a.task !== null);
+      const failedAssignments = assignments.filter(a => a.task === null);
+
+      expect(successfulAssignments).toHaveLength(1);
+      expect(failedAssignments).toHaveLength(2);
+    });
+
+    it('should handle project validation correctly', async () => {
+      // Test with invalid project format
+      await expect(agentService.getNextTask('invalid-project-format'))
+        .rejects.toThrow();
+
+      // Test with valid format but non-existent project
+      await expect(agentService.getNextTask('550e8400-e29b-41d4-a716-446655440000'))
+        .rejects.toThrow();
     });
   });
 });
