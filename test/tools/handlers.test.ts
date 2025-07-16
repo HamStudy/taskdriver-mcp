@@ -43,10 +43,10 @@ describe('ToolHandlers', () => {
         
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
-        expect(response.data.name).toBe('test-project');
-        expect(response.data.description).toBe('A test project');
-        expect(response.data.status).toBe('active');
-        expect(response.data.id).toBeDefined();
+        expect(response.project.name).toBe('test-project');
+        expect(response.project.description).toBe('A test project');
+        expect(response.project.status).toBe('active');
+        expect(response.project.id).toBeDefined();
       });
 
       it('should handle validation errors', async () => {
@@ -124,7 +124,7 @@ describe('ToolHandlers', () => {
         });
 
         const createResponse = JSON.parse(createResult.content[0].text);
-        const projectId = createResponse.data.id;
+        const projectId = createResponse.project.id;
 
         const result = await handlers.handleToolCall({
           params: {
@@ -176,7 +176,7 @@ describe('ToolHandlers', () => {
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.data.id;
+      projectId = createResponse.project.id;
     });
 
     describe('create_task_type', () => {
@@ -251,7 +251,7 @@ describe('ToolHandlers', () => {
       });
 
       const createProjectResponse = JSON.parse(createProjectResult.content[0].text);
-      projectId = createProjectResponse.data.id;
+      projectId = createProjectResponse.project.id;
 
       // Create a test task type
       const createTaskTypeResult = await handlers.handleToolCall({
@@ -406,7 +406,7 @@ describe('ToolHandlers', () => {
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.data.id;
+      projectId = createResponse.project.id;
     });
 
     describe('list_active_agents', () => {
@@ -448,7 +448,7 @@ describe('ToolHandlers', () => {
       });
 
       const createProjectResponse = JSON.parse(createProjectResult.content[0].text);
-      projectId = createProjectResponse.data.id;
+      projectId = createProjectResponse.project.id;
 
       // Create a test task type
       const createTaskTypeResult = await handlers.handleToolCall({
@@ -626,7 +626,7 @@ describe('ToolHandlers', () => {
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.data.id;
+      projectId = createResponse.project.id;
     });
 
     describe('get_project_stats', () => {

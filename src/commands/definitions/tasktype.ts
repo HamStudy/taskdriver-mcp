@@ -115,6 +115,20 @@ const listTaskTypesParams = [
     description: 'Project ID or name',
     required: true,
     positional: true
+  },
+  {
+    name: 'limit',
+    type: 'number',
+    description: 'Maximum number of task types to return',
+    alias: 'l',
+    default: 50
+  },
+  {
+    name: 'offset',
+    type: 'number',
+    description: 'Number of task types to skip',
+    alias: 'o',
+    default: 0
   }
 ] as const;
 
@@ -135,21 +149,41 @@ export const listTaskTypes: CommandDefinition<typeof listTaskTypesParams> = {
       };
     }
 
-    const taskTypes = await context.taskType.listTaskTypes(project.id);
+    const allTaskTypes = await context.taskType.listTaskTypes(project.id);
+    
+    // Apply pagination
+    const offset = args.offset || 0;
+    const limit = args.limit || 50;
+    const taskTypes = allTaskTypes.slice(offset, offset + limit);
+    
+    const totalCount = allTaskTypes.length;
+    const rangeStart = totalCount > 0 ? offset + 1 : 0;
+    const rangeEnd = offset + taskTypes.length;
+    const hasMore = rangeEnd < totalCount;
 
     return {
       success: true,
-      data: taskTypes.map(tt => ({
-        id: tt.id,
-        name: tt.name,
-        projectId: tt.projectId,
-        template: tt.template,
-        variables: tt.variables,
-        duplicateHandling: tt.duplicateHandling,
-        maxRetries: tt.maxRetries,
-        leaseDurationMinutes: tt.leaseDurationMinutes,
-        createdAt: tt.createdAt
-      }))
+      data: {
+        taskTypes: taskTypes.map(tt => ({
+          id: tt.id,
+          name: tt.name,
+          projectId: tt.projectId,
+          template: tt.template,
+          variables: tt.variables,
+          duplicateHandling: tt.duplicateHandling,
+          maxRetries: tt.maxRetries,
+          leaseDurationMinutes: tt.leaseDurationMinutes,
+          createdAt: tt.createdAt
+        })),
+        pagination: {
+          total: totalCount,
+          offset: offset,
+          limit: limit,
+          rangeStart: rangeStart,
+          rangeEnd: rangeEnd,
+          hasMore: hasMore
+        }
+      }
     };
   }
 };

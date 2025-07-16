@@ -81,10 +81,11 @@ export const createProject: CommandDefinition<typeof createProjectParams> = {
 
     return {
       success: true,
-      data: {
+      project: {
         id: project.id,
         name: project.name,
         description: project.description,
+        instructions: project.instructions,
         status: project.status,
         createdAt: project.createdAt,
         config: project.config
@@ -142,19 +143,36 @@ export const listProjects: CommandDefinition<typeof listProjectsParams> = {
       filteredProjects = allProjects.filter(p => p.status === status);
     }
     
-    const projects = filteredProjects.slice(args.offset || 0, (args.offset || 0) + (args.limit || 100));
+    const offset = args.offset || 0;
+    const limit = args.limit || 100;
+    const projects = filteredProjects.slice(offset, offset + limit);
+    
+    const totalCount = filteredProjects.length;
+    const rangeStart = totalCount > 0 ? offset + 1 : 0;
+    const rangeEnd = offset + projects.length;
+    const hasMore = rangeEnd < totalCount;
 
     return {
       success: true,
-      data: projects.map(p => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        status: p.status,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-        stats: p.stats
-      }))
+      data: {
+        projects: projects.map(p => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          status: p.status,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          stats: p.stats
+        })),
+        pagination: {
+          total: totalCount,
+          offset: offset,
+          limit: limit,
+          rangeStart: rangeStart,
+          rangeEnd: rangeEnd,
+          hasMore: hasMore
+        }
+      }
     };
   }
 };
@@ -174,7 +192,7 @@ export const getProject: CommandDefinition<typeof getProjectParams> = {
   name: 'getProject',
   mcpName: 'get_project',
   cliName: 'get-project',
-  description: 'Get detailed information about a specific project including configuration, statistics, and metadata. Use this to understand project settings, check task counts, or verify project configuration before creating tasks.',
+  description: 'Get detailed information about a specific project including instructions, configuration, statistics, and metadata. Returns project instructions that agents need to understand their role and objectives. Use this to understand project settings, check task counts, or verify project configuration before creating tasks.',
   parameters: getProjectParams,
   async handler(context, args) {
     // Find project by name or ID

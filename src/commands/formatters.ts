@@ -13,6 +13,47 @@ export interface FormattedOutput {
 }
 
 /**
+ * Format time as relative (e.g., "2 hours ago", "3 days ago")
+ */
+function formatRelativeTime(date: string | Date): string {
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  
+  const seconds = Math.floor(diffMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (days > 0) {
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  } else if (hours > 0) {
+    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  } else if (minutes > 0) {
+    return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+  } else {
+    return `${seconds} sec${seconds > 1 ? 's' : ''} ago`;
+  }
+}
+
+/**
+ * Strip ANSI color codes to get visual width
+ */
+function getVisualWidth(text: string): number {
+  // Remove ANSI escape sequences
+  return text.replace(/\u001b\[[0-9;]*m/g, '').length;
+}
+
+/**
+ * Pad text to width, accounting for ANSI color codes
+ */
+function padEndVisual(text: string, width: number): string {
+  const visualWidth = getVisualWidth(text);
+  const padding = Math.max(0, width - visualWidth);
+  return text + ' '.repeat(padding);
+}
+
+/**
  * Format command result for display
  */
 export function formatCommandResult(
@@ -74,7 +115,7 @@ function formatData(data: any, commandName: string): string {
     if (data.projects.length === 0) {
       return chalk.gray('No projects found');
     }
-    return `Found ${data.projects.length} projects` + '\n' + formatProjectList(data.projects);
+    return `Found ${data.projects.length} projects` + '\n' + formatProjectList(data.projects, data.pagination);
   }
 
   if (data.tasks) {
@@ -82,11 +123,19 @@ function formatData(data: any, commandName: string): string {
     if (data.tasks.length === 0) {
       return chalk.gray('No tasks found');
     }
-    return `Found ${data.tasks.length} tasks` + '\n' + formatTaskList(data.tasks);
+    return `Found ${data.tasks.length} tasks` + '\n' + formatTaskList(data.tasks, data.pagination);
   }
 
-  if (data.status) {
-    // Health check result
+  if (data.taskTypes) {
+    // Task type list result  
+    if (data.taskTypes.length === 0) {
+      return chalk.gray('No task types found');
+    }
+    return `Found ${data.taskTypes.length} task types` + '\n' + formatTaskTypeList(data.taskTypes, data.pagination);
+  }
+
+  if (data.status && (data.timestamp || data.storage || commandName.includes('health'))) {
+    // Health check result - more specific detection
     return formatHealthCheck(data);
   }
 
@@ -135,6 +184,10 @@ function formatProject(project: any): string {
   output += `${chalk.gray('Status:')} ${project.status === 'active' ? chalk.green(project.status.toUpperCase()) : chalk.yellow(project.status.toUpperCase())}\n`;
   output += `${chalk.gray('Description:')} ${project.description || 'No description'}\n`;
   output += `${chalk.gray('Created:')} ${new Date(project.createdAt).toLocaleString()}\n`;
+
+  if (project.instructions) {
+    output += `\n${chalk.bold('Instructions:')}\n${project.instructions}\n`;
+  }
 
   if (project.config) {
     output += `\n${chalk.bold('Configuration:')}\n`;
@@ -203,29 +256,56 @@ function formatTaskStatus(status: string): string {
 /**
  * Format project list
  */
-function formatProjectList(projects: any[]): string {
-  let output = `\n${chalk.bold('Projects:')} (${projects.length})\n\n`;
+function formatProjectList(projects: any[], pagination?: any): string {
+  let output = `\n${chalk.bold('Projects:')} (${projects.length})\n`;
   
-  const maxNameWidth = Math.max(...projects.map(p => p.name.length), 8);
+  // Add pagination info if provided
+  if (pagination) {
+    output += chalk.gray(`Showing ${pagination.rangeStart}-${pagination.rangeEnd} of ${pagination.total} projects`);
+    if (pagination.hasMore) {
+      output += chalk.gray(' (more available)');
+    }
+    output += '\n';
+  }
+  
+  output += '\n';
+  
+  // Calculate dynamic column widths based on actual data
+  const names = projects.map(p => p.name);
+  const statuses = projects.map(p => p.status.toUpperCase());
+  const taskCounts = projects.map(p => p.stats ? `${p.stats.totalTasks}` : '0');
+  const descriptions = projects.map(p => p.description || 'No description');
+  
+  const nameWidth = Math.max(...names.map(n => n.length), 'NAME'.length);
+  const statusWidth = Math.max(...statuses.map(s => s.length), 'STATUS'.length);
+  const tasksWidth = Math.max(...taskCounts.map(t => t.length), 'TASKS'.length);
+  const descriptionWidth = Math.max(...descriptions.map(d => d.length), 'DESCRIPTION'.length);
   
   // Header
   output += chalk.bold(
-    'NAME'.padEnd(maxNameWidth) + ' | ' +
-    'STATUS'.padEnd(8) + ' | ' +
-    'TASKS'.padEnd(8) + ' | ' +
-    'DESCRIPTION'
+    'NAME'.padEnd(nameWidth) + ' | ' +
+    'STATUS'.padEnd(statusWidth) + ' | ' +
+    'TASKS'.padEnd(tasksWidth) + ' | ' +
+    'DESCRIPTION'.padEnd(descriptionWidth)
   ) + '\n';
-  output += chalk.gray('-'.repeat(maxNameWidth + 8 + 8 + 30)) + '\n';
+  output += chalk.gray('-'.repeat(nameWidth + 3 + statusWidth + 3 + tasksWidth + 3 + descriptionWidth)) + '\n';
   
   for (const project of projects) {
     const status = project.status === 'active' ? chalk.green('ACTIVE') : chalk.yellow(project.status.toUpperCase());
     const tasks = project.stats ? `${project.stats.totalTasks}` : '0';
-    const description = (project.description || 'No description').substring(0, 40);
+    const description = project.description || 'No description';
     
-    output += project.name.padEnd(maxNameWidth) + ' | ' +
-              status.padEnd(8) + ' | ' +
-              tasks.padEnd(8) + ' | ' +
-              description + '\n';
+    output += project.name.padEnd(nameWidth) + ' | ' +
+              padEndVisual(status, statusWidth) + ' | ' +
+              tasks.padEnd(tasksWidth) + ' | ' +
+              description.padEnd(descriptionWidth) + '\n';
+  }
+  
+  // Add page info at the end if pagination exists and has a meaningful limit
+  if (pagination && pagination.limit < pagination.total) {
+    const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+    const totalPages = Math.ceil(pagination.total / pagination.limit);
+    output += '\n' + chalk.gray(`Page ${currentPage} of ${totalPages}`);
   }
   
   return output;
@@ -234,28 +314,63 @@ function formatProjectList(projects: any[]): string {
 /**
  * Format task list
  */
-function formatTaskList(tasks: any[]): string {
-  let output = `\n${chalk.bold('Tasks:')} (${tasks.length})\n\n`;
+function formatTaskList(tasks: any[], pagination?: any): string {
+  let output = `\n${chalk.bold('Tasks:')} (${tasks.length})\n`;
+  
+  // Add pagination info if provided
+  if (pagination) {
+    output += chalk.gray(`Showing ${pagination.rangeStart}-${pagination.rangeEnd} of ${pagination.total} tasks`);
+    if (pagination.hasMore) {
+      output += chalk.gray(' (more available)');
+    }
+    output += '\n';
+  }
+  
+  output += '\n';
+  
+  // Calculate dynamic column widths based on actual data
+  const taskIds = tasks.map(t => t.id.substring(0, 10));
+  const typeNames = tasks.map(t => t.typeName || t.typeId || '-');
+  const assignedTos = tasks.map(t => t.assignedTo || '-');
+  const createdTimes = tasks.map(t => formatRelativeTime(t.createdAt));
+  
+  const taskIdWidth = Math.max(...taskIds.map(id => id.length), 'TASK ID'.length);
+  const typeWidth = Math.max(...typeNames.map(type => type.length), 'TYPE'.length);
+  // Calculate status width based on actual status values (without chalk formatting)
+  const statusValues = ['queued', 'running', 'completed', 'failed'];
+  const statusWidth = Math.max(...statusValues.map(s => s.toUpperCase().length), 'STATUS'.length);
+  const assignedWidth = Math.max(...assignedTos.map(a => a.length), 'ASSIGNED TO'.length);
+  const createdWidth = Math.max(...createdTimes.map(c => c.length), 'CREATED'.length);
   
   // Header
   output += chalk.bold(
-    'TASK ID'.padEnd(12) + ' | ' +
-    'STATUS'.padEnd(12) + ' | ' +
-    'ASSIGNED TO'.padEnd(15) + ' | ' +
-    'CREATED'
+    'TASK ID'.padEnd(taskIdWidth) + ' | ' +
+    'TYPE'.padEnd(typeWidth) + ' | ' +
+    'STATUS'.padEnd(statusWidth) + ' | ' +
+    'ASSIGNED TO'.padEnd(assignedWidth) + ' | ' +
+    'CREATED'.padEnd(createdWidth)
   ) + '\n';
-  output += chalk.gray('-'.repeat(70)) + '\n';
+  output += chalk.gray('-'.repeat(taskIdWidth + 3 + typeWidth + 3 + statusWidth + 3 + assignedWidth + 3 + createdWidth)) + '\n';
   
   for (const task of tasks) {
-    const taskId = task.id.substring(0, 10) + '..';
+    const taskId = task.id.substring(0, 10); 
+    const taskType = task.typeName || task.typeId || '-';
     const status = formatTaskStatus(task.status);
-    const assignedTo = (task.assignedTo || '-').substring(0, 13);
-    const created = new Date(task.createdAt).toLocaleDateString();
+    const assignedTo = task.assignedTo || '-';
+    const created = formatRelativeTime(task.createdAt);
     
-    output += taskId.padEnd(12) + ' | ' +
-              status.padEnd(12) + ' | ' +
-              assignedTo.padEnd(15) + ' | ' +
-              created + '\n';
+    output += taskId.padEnd(taskIdWidth) + ' | ' +
+              taskType.padEnd(typeWidth) + ' | ' +
+              padEndVisual(status, statusWidth) + ' | ' +
+              assignedTo.padEnd(assignedWidth) + ' | ' +
+              created.padEnd(createdWidth) + '\n';
+  }
+  
+  // Add page info at the end if pagination exists and has a meaningful limit
+  if (pagination && pagination.limit < pagination.total) {
+    const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+    const totalPages = Math.ceil(pagination.total / pagination.limit);
+    output += '\n' + chalk.gray(`Page ${currentPage} of ${totalPages}`);
   }
   
   return output;
@@ -264,29 +379,56 @@ function formatTaskList(tasks: any[]): string {
 /**
  * Format task type list
  */
-function formatTaskTypeList(taskTypes: any[]): string {
-  let output = `\n${chalk.bold('Task Types:')} (${taskTypes.length})\n\n`;
+function formatTaskTypeList(taskTypes: any[], pagination?: any): string {
+  let output = `\n${chalk.bold('Task Types:')} (${taskTypes.length})\n`;
   
-  const maxNameWidth = Math.max(...taskTypes.map(tt => tt.name.length), 8);
+  // Add pagination info if provided
+  if (pagination) {
+    output += chalk.gray(`Showing ${pagination.rangeStart}-${pagination.rangeEnd} of ${pagination.total} task types`);
+    if (pagination.hasMore) {
+      output += chalk.gray(' (more available)');
+    }
+    output += '\n';
+  }
+  
+  output += '\n';
+  
+  // Calculate dynamic column widths based on actual data
+  const names = taskTypes.map(tt => tt.name);
+  const templates = taskTypes.map(tt => tt.template ? 'Yes' : 'No');
+  const variables = taskTypes.map(tt => tt.variables ? tt.variables.join(', ') : '-');
+  const duplicateHandlings = taskTypes.map(tt => tt.duplicateHandling || 'allow');
+  
+  const nameWidth = Math.max(...names.map(n => n.length), 'NAME'.length);
+  const templateWidth = Math.max(...templates.map(t => t.length), 'TEMPLATE'.length);
+  const variablesWidth = Math.max(...variables.map(v => v.length), 'VARIABLES'.length);
+  const duplicateWidth = Math.max(...duplicateHandlings.map(d => d.length), 'DUPLICATE HANDLING'.length);
   
   // Header
   output += chalk.bold(
-    'NAME'.padEnd(maxNameWidth) + ' | ' +
-    'TEMPLATE'.padEnd(10) + ' | ' +
-    'VARIABLES'.padEnd(15) + ' | ' +
-    'DUPLICATE HANDLING'
+    'NAME'.padEnd(nameWidth) + ' | ' +
+    'TEMPLATE'.padEnd(templateWidth) + ' | ' +
+    'VARIABLES'.padEnd(variablesWidth) + ' | ' +
+    'DUPLICATE HANDLING'.padEnd(duplicateWidth)
   ) + '\n';
-  output += chalk.gray('-'.repeat(maxNameWidth + 50)) + '\n';
+  output += chalk.gray('-'.repeat(nameWidth + 3 + templateWidth + 3 + variablesWidth + 3 + duplicateWidth)) + '\n';
   
   for (const taskType of taskTypes) {
     const hasTemplate = taskType.template ? chalk.green('Yes') : chalk.gray('No');
-    const variables = taskType.variables ? taskType.variables.join(', ').substring(0, 13) : '-';
+    const vars = taskType.variables ? taskType.variables.join(', ') : '-';
     const duplicateHandling = taskType.duplicateHandling || 'allow';
     
-    output += taskType.name.padEnd(maxNameWidth) + ' | ' +
-              hasTemplate.padEnd(10) + ' | ' +
-              variables.padEnd(15) + ' | ' +
-              duplicateHandling + '\n';
+    output += taskType.name.padEnd(nameWidth) + ' | ' +
+              padEndVisual(hasTemplate, templateWidth) + ' | ' +
+              vars.padEnd(variablesWidth) + ' | ' +
+              duplicateHandling.padEnd(duplicateWidth) + '\n';
+  }
+  
+  // Add page info at the end if pagination exists and has a meaningful limit
+  if (pagination && pagination.limit < pagination.total) {
+    const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+    const totalPages = Math.ceil(pagination.total / pagination.limit);
+    output += '\n' + chalk.gray(`Page ${currentPage} of ${totalPages}`);
   }
   
   return output;

@@ -50,11 +50,13 @@ echo "✓ System is healthy"
 # Step 2: Create project
 echo -e "\n${BLUE}Step 2: Project Creation${NC}"
 echo "🏗️  Creating project '$PROJECT_NAME'..."
-PROJECT_OUTPUT=$($CLI_CMD create-project "$PROJECT_NAME" "$PROJECT_DESC" --max-retries 2 --lease-duration 5)
-if [[ $PROJECT_OUTPUT == *"✅"* && $PROJECT_OUTPUT == *"$PROJECT_NAME"* ]]; then
-    echo "✓ Project created successfully"
+PROJECT_OUTPUT=$($CLI_CMD create-project "$PROJECT_NAME" "$PROJECT_DESC" --instructions "Process files efficiently. Remove PII. Follow security protocols." --max-retries 2 --lease-duration 5)
+if [[ $PROJECT_OUTPUT == *"✅"* && $PROJECT_OUTPUT == *"$PROJECT_NAME"* && $PROJECT_OUTPUT == *"Instructions:"* ]]; then
+    echo "✓ Project created successfully (includes instructions)"
 else
-    echo -e "${RED}❌ Project creation failed${NC}"
+    echo -e "${RED}❌ Project creation failed or missing instructions${NC}"
+    echo "Expected: ✅ success message, project name, and Instructions: section"
+    echo "Actual output:"
     echo "$PROJECT_OUTPUT"
     exit 1
 fi
@@ -77,10 +79,13 @@ fi
 # Step 4: Get project details
 echo -e "\n🔍 Getting project details..."
 PROJECT_DETAILS=$($CLI_CMD get-project "$PROJECT_NAME")
-if [[ $PROJECT_DETAILS == *"$PROJECT_NAME"* ]] && [[ $PROJECT_DETAILS == *"Total Tasks: 0"* ]]; then
-    echo "✓ Project details correct"
+if [[ $PROJECT_DETAILS == *"$PROJECT_NAME"* ]] && [[ $PROJECT_DETAILS == *"Total Tasks: 0"* ]] && [[ $PROJECT_DETAILS == *"Status:"* ]] && [[ $PROJECT_DETAILS == *"Configuration:"* ]] && [[ $PROJECT_DETAILS == *"Statistics:"* ]] && [[ $PROJECT_DETAILS == *"Instructions:"* ]] && [[ $PROJECT_DETAILS == *"Process files efficiently"* ]]; then
+    echo "✓ Project details correct (includes status, config, stats, and instructions)"
 else
-    echo -e "${RED}❌ Project details incorrect${NC}"
+    echo -e "${RED}❌ Project details incorrect - missing critical sections${NC}"
+    echo "Expected sections: Status, Configuration, Statistics, Instructions"
+    echo "Expected instructions content: 'Process files efficiently'"
+    echo "Actual output:"
     echo "$PROJECT_DETAILS"
     exit 1
 fi

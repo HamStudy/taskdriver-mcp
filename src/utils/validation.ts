@@ -163,7 +163,7 @@ export const taskFiltersSchema = Joi.object({
   status: Joi.string().valid('queued', 'running', 'completed', 'failed').optional(),
   assignedTo: agentNameSchema.optional(),
   typeId: uuidSchema.optional(),
-  limit: Joi.number().integer().min(1).max(1000).default(100),
+  limit: Joi.number().integer().min(0).default(100),
   offset: Joi.number().integer().min(0).default(0),
 });
 

@@ -716,14 +716,18 @@ export class FileStorageProvider extends BaseStorageProvider {
         }
       }
       
-      // Sort by creation date (newest first)
-      tasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      // Sort by creation date (oldest first - FIFO)
+      tasks.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       
-      // Apply pagination
-      const offset = filters?.offset || 0;
-      const limit = filters?.limit || 100;
+      // Apply pagination only if limit is specified
+      if (filters?.limit !== undefined || filters?.offset !== undefined) {
+        const offset = filters?.offset || 0;
+        const limit = filters?.limit || 100;
+        return tasks.slice(offset, offset + limit);
+      }
       
-      return tasks.slice(offset, offset + limit);
+      // Return all tasks if no pagination specified
+      return tasks;
     } catch (error: any) {
       if (error.message.includes('not found')) {
         return [];

@@ -244,7 +244,7 @@ const listTasksParams = [
   {
     name: 'limit',
     type: 'number',
-    description: 'Maximum number of tasks to return',
+    description: 'Maximum number of tasks to return (0 = no limit)',
     alias: 'l',
     default: 50
   },
@@ -264,6 +264,14 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
   description: 'List and filter tasks in a project by status, type, or assigned agent. Use this to monitor task progress, find specific tasks, check what work is queued/completed, or track task assignment status. Essential for workflow monitoring and progress tracking.',
   parameters: listTasksParams,
   async handler(context, args) {
+    // Validate limit parameter
+    if (args.limit !== undefined && args.limit < 0) {
+      return {
+        success: false,
+        error: `Limit must be 0 or greater, got: ${args.limit}`
+      };
+    }
+
     // Find project
     const projects = await context.project.listProjects(true);
     const project = findProjectByNameOrId(projects, args.projectId);
@@ -282,18 +290,50 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
       offset: args.offset
     };
 
-    const tasks = await context.task.listTasks(project.id, filters);
+    // Get task types to map typeId to typeName
+    const taskTypes = await context.taskType.listTaskTypes(project.id);
+    const typeMap = new Map(taskTypes.map(tt => [tt.id, tt.name]));
+    
+    // Get ALL tasks matching the filters (without pagination) to get true total
+    const allTasksFilters = {
+      status: filters.status,
+      typeId: filters.typeId, 
+      assignedTo: filters.assignedTo
+      // No limit/offset for total count
+    };
+    const allTasks = await context.task.listTasks(project.id, allTasksFilters);
+    const totalCount = allTasks.length;
+    
+    // Apply pagination to get the current page (unless limit is 0)
+    const offset = filters.offset || 0;
+    const limit = filters.limit === 0 ? undefined : (filters.limit || 50);
+    const pagedTasks = limit ? allTasks.slice(offset, offset + limit) : allTasks.slice(offset);
+    
+    const rangeStart = totalCount > 0 ? offset + 1 : 0;
+    const rangeEnd = offset + pagedTasks.length;
+    const hasMore = limit ? rangeEnd < totalCount : false;
 
     return {
       success: true,
-      data: tasks.map(t => ({
-        id: t.id,
-        typeId: t.typeId,
-        status: t.status,
-        assignedTo: t.assignedTo,
-        retryCount: t.retryCount,
-        createdAt: t.createdAt
-      }))
+      data: {
+        tasks: pagedTasks.map(t => ({
+          id: t.id,
+          typeId: t.typeId,
+          typeName: typeMap.get(t.typeId) || t.typeId,
+          status: t.status,
+          assignedTo: t.assignedTo,
+          retryCount: t.retryCount,
+          createdAt: t.createdAt
+        })),
+        pagination: {
+          total: totalCount,
+          offset: offset,
+          limit: limit || totalCount, // Show actual limit or total if no limit
+          rangeStart: rangeStart,
+          rangeEnd: rangeEnd,
+          hasMore: hasMore
+        }
+      }
     };
   }
 };

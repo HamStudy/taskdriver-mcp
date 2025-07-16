@@ -38,6 +38,16 @@ async function buildCli() {
     .scriptName('taskdriver')
     .usage('$0 <command> [options]')
     .demandCommand(1, 'You need at least one command before moving on')
+    .strict() // Reject unrecognized commands and options
+    .fail((msg, err) => {
+      if (err) {
+        console.error(chalk.red('❌ Error:'), err.message);
+      } else {
+        console.error(chalk.red('❌ Error:'), msg);
+        console.error('\nRun --help to see available commands and options');
+      }
+      process.exit(1);
+    })
     .help()
     .version()
     .alias('h', 'help');
