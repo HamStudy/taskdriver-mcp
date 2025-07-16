@@ -14,7 +14,7 @@ import { COMMAND_DEFINITIONS } from './commands/definitions.js';
 import { generateCliCommand, generateCliHandler } from './commands/generators.js';
 
 // Global service context
-let context: any = null;
+let context: ReturnType<typeof createServiceContext> | null = null;
 
 async function initializeContext() {
   if (context) return context;
@@ -26,8 +26,9 @@ async function initializeContext() {
     
     context = createServiceContext(storage);
     return context;
-  } catch (error: any) {
-    console.error(chalk.red('❌ Failed to initialize services:'), error.message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red('❌ Failed to initialize services:'), errorMessage);
     process.exit(1);
   }
 }

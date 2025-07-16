@@ -2,9 +2,10 @@
  * Generators for MCP tools and CLI commands from command definitions
  */
 
-import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { CommandDefinition, CommandParameter, ServiceContext } from './types.js';
+import { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { formatCommandResult, OutputFormat } from './formatters.js';
+import { GenericCommandDefinition } from './index.js';
+import { CommandDefinition, ServiceContext } from './types.js';
 
 /**
  * Generate MCP tool from command definition
@@ -12,6 +13,14 @@ import { formatCommandResult, OutputFormat } from './formatters.js';
 export function generateMcpTool(def: CommandDefinition): Tool {
   const properties: Record<string, any> = {};
   const required: string[] = [];
+
+  // Add format parameter to all MCP tools
+  properties.format = {
+    type: 'string',
+    description: 'Output format (human-readable text or JSON)',
+    enum: ['human', 'json'],
+    default: 'human'
+  };
 
   for (const param of def.parameters) {
     const schema: any = {
@@ -187,7 +196,7 @@ export function generateCliCommand(def: CommandDefinition) {
 /**
  * Generate CLI handler from command definition
  */
-export function generateCliHandler(def: CommandDefinition, context: ServiceContext) {
+export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DEF, context: ServiceContext) {
   return async (argv: any) => {
     try {
       // Extract format option
@@ -210,7 +219,8 @@ export function generateCliHandler(def: CommandDefinition, context: ServiceConte
               const formatted = formatCommandResult(
                 { success: false, error: `Failed to read file for ${param.name}: ${error.message}` },
                 def.cliName,
-                format
+                format,
+                processedArgs
               );
               console.error(formatted.text);
               process.exit(1);
@@ -222,7 +232,7 @@ export function generateCliHandler(def: CommandDefinition, context: ServiceConte
       const result = await def.handler(context, processedArgs);
       
       // Format and display result
-      const formatted = formatCommandResult(result, def.cliName, format);
+      const formatted = formatCommandResult(result, def.cliName, format, processedArgs);
       
       if (formatted.text) {
         if (formatted.exitCode === 0) {
@@ -237,7 +247,8 @@ export function generateCliHandler(def: CommandDefinition, context: ServiceConte
       const formatted = formatCommandResult(
         { success: false, error: error.message || 'Unknown error' },
         def.cliName,
-        argv.format || 'human'
+        argv.format || 'human',
+        argv
       );
       console.error(formatted.text);
       process.exit(1);
@@ -248,33 +259,73 @@ export function generateCliHandler(def: CommandDefinition, context: ServiceConte
 /**
  * Generate MCP handler from command definition
  */
-export function generateMcpHandler(def: CommandDefinition, context: ServiceContext) {
+export function generateMcpHandler<DEF extends GenericCommandDefinition>(def: DEF, context: ServiceContext) {
   return async (args: any): Promise<CallToolResult> => {
     try {
-      const result = await def.handler(context, args);
+      // Extract format parameter (default to 'json' for MCP tools)
+      const format = (args.format || 'json') as OutputFormat;
       
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2)
-          }
-        ],
-        isError: !result.success
-      };
+      // Remove format from args passed to handler
+      const handlerArgs = { ...args };
+      delete handlerArgs.format;
+      
+      const result = await def.handler(context, handlerArgs);
+      
+      // Format output based on requested format
+      if (format === 'json') {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2)
+            }
+          ],
+          isError: !result.success
+        };
+      } else {
+        // Use human-readable formatter
+        const formatted = formatCommandResult(result, def.mcpName, 'human', handlerArgs);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: formatted.text
+            }
+          ],
+          isError: formatted.exitCode !== 0
+        };
+      }
     } catch (error: any) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify({
-              success: false,
-              error: error.message || 'Unknown error occurred'
-            }, null, 2)
-          }
-        ],
-        isError: true
+      // Extract format for error formatting
+      const format = (args.format || 'json') as OutputFormat;
+      const errorResult = {
+        success: false,
+        error: error.message || 'Unknown error occurred'
       };
+      
+      if (format === 'json') {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(errorResult, null, 2)
+            }
+          ],
+          isError: true
+        };
+      } else {
+        // Use human-readable formatter for errors
+        const formatted = formatCommandResult(errorResult, def.mcpName, 'human', args);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: formatted.text
+            }
+          ],
+          isError: true
+        };
+      }
     }
   };
 }

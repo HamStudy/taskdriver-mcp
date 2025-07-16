@@ -18,12 +18,12 @@ export interface TaskDriverConfig {
     };
     mongodb?: {
       database: string;
-      options?: Record<string, any>;
+      options?: Record<string, string | number | boolean>;
     };
     redis?: {
       database: number;
       keyPrefix: string;
-      options?: Record<string, any>;
+      options?: Record<string, string | number | boolean>;
     };
   };
 

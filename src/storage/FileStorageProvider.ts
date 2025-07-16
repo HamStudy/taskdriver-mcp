@@ -211,7 +211,7 @@ export class FileStorageProvider extends BaseStorageProvider {
       updatedAt: now,
       config: {
         defaultMaxRetries: input.config?.defaultMaxRetries ?? 3,
-        defaultLeaseDurationMinutes: input.config?.defaultLeaseDurationMinutes ?? 10,
+        defaultLeaseDurationMinutes: input.config?.defaultLeaseDurationMinutes ?? 1.5,
         reaperIntervalMinutes: input.config?.reaperIntervalMinutes ?? 1,
       },
       stats: {

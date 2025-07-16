@@ -9,6 +9,18 @@ import { TaskTypeService } from '../services/TaskTypeService.js';
 import { AgentService } from '../services/AgentService.js';
 import { LeaseService } from '../services/LeaseService.js';
 
+type CamelToSnakeCase<S extends string> = S extends `${infer T}${infer U}` ?
+  `${T extends Capitalize<T> ? "_" : ""}${Lowercase<T>}${CamelToSnakeCase<U>}` :
+  S;
+type CamelToKebabCase<S extends string> = S extends `${infer T}${infer U}` ?
+  `${T extends Capitalize<T> ? "-" : ""}${Lowercase<T>}${CamelToKebabCase<U>}` :
+  S;
+
+export type PromisedReturnType<T extends (...args: any[]) => any> =
+  T extends (...args: any[]) => Promise<infer R> ? R :
+  T extends (...args: any[]) => infer R ? R :
+  never;
+
 // Service context for command handlers
 export interface ServiceContext {
   storage: StorageProvider;
@@ -49,22 +61,28 @@ type ParameterValue<T extends CommandParameter> =
 // Convert parameter array to argument object type
 export type InferArgs<T extends readonly CommandParameter[]> = {
   [K in T[number] as K['name']]: ParameterValue<K>
-};
+} & { verbose?: boolean }; // Optional verbose flag for all commands
 
 // Command definition interface with type inference
-export interface CommandDefinition<T extends readonly CommandParameter[] = readonly CommandParameter[]> {
+export interface CommandDefinition<T extends readonly CommandParameter[] = readonly CommandParameter[], R extends CommandResult<any> = CommandResult<any>, NAME extends string = string> {
   // Identity
-  name: string;
-  mcpName: string;      // MCP tool name (with underscores)
-  cliName: string;      // CLI command name (with dashes)
+  name: NAME;
+  mcpName: CamelToSnakeCase<NAME>;      // MCP tool name (with underscores)
+  cliName: CamelToKebabCase<NAME>;      // CLI command name (with dashes)
   description: string;
   
   // Parameters
   parameters: T;
   
-  // Handler function with inferred argument types
-  handler: (context: ServiceContext, args: InferArgs<T>) => Promise<CommandResult>;
+  // Return data type for formatters
+  returnDataType: 'single' | 'list' | 'stats' | 'health' | 'generic';
   
+  // Handler function with inferred argument types
+  handler(context: ServiceContext, args: InferArgs<T>): Promise<R>;
+  
+  // Formatting functions for CLI output
+  formatResult(result: R, args: InferArgs<T>): string;
+
   // Optional metadata
   examples?: string[];
   notes?: string;
@@ -73,12 +91,36 @@ export interface CommandDefinition<T extends readonly CommandParameter[] = reado
   discoverability?: ToolDiscoverability;
 }
 
+// Generic function to define commands with full type inference
+export function defineCommand<T extends readonly CommandParameter[], R extends CommandResult<any>, NAME extends string>(
+  definition: CommandDefinition<T, R, NAME>
+): CommandDefinition<T, R, NAME> {
+  return definition;
+}
+
+// Type utilities to extract command info from defined commands
+export type ExtractCommandName<T> = T extends CommandDefinition<infer P> ? T['name'] : never;
+export type ExtractMcpName<T> = T extends CommandDefinition<infer P> ? T['mcpName'] : never;
+export type ExtractCliName<T> = T extends CommandDefinition<infer P> ? T['cliName'] : never;
+export type ExtractReturnDataType<T> = T extends CommandDefinition<infer P> ? T['returnDataType'] : never;
+export type ExtractParameters<T> = T extends CommandDefinition<infer P> ? P : never;
+
 // Result format for consistent output
-export interface CommandResult {
+export interface CommandResult<T = any> {
   success: boolean;
-  data?: any;
+  agentName?: string; // Name of agent that handled the command
+  data?: T;
   error?: string;
   message?: string;
+}
+
+export type TaskTypes<T extends CommandDefinition> = {
+  name: T['name'];
+  mcpName: T['mcpName'];
+  cliName: T['cliName'];
+  args: InferArgs<T['parameters']>;
+  returnType: PromisedReturnType<T['handler']>;
+  def: T;
 }
 
 // Enhanced discoverability metadata for LLM agents

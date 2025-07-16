@@ -2,12 +2,172 @@
  * Task Management Commands
  */
 
-import { CommandDefinition } from '../types.js';
+import chalk from 'chalk';
+import { CommandParameter, CommandResult, defineCommand, TaskTypes } from '../types.js';
+import { Task } from '../../types/Task.js';
 import { 
   findProjectByNameOrId, 
   findTaskTypeByNameOrId,
   parseJsonSafely 
 } from '../utils.js';
+
+// Task formatting helpers
+
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  
+  const seconds = Math.floor(diffMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (days > 0) {
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  } else if (hours > 0) {
+    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  } else if (minutes > 0) {
+    return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+  } else {
+    return `${seconds} sec${seconds > 1 ? 's' : ''} ago`;
+  }
+}
+
+function getVisualWidth(text: string): number {
+  return text.replace(/\u001b\[[0-9;]*m/g, '').length;
+}
+
+function padEndVisual(text: string, width: number): string {
+  const visualWidth = getVisualWidth(text);
+  const padding = Math.max(0, width - visualWidth);
+  return text + ' '.repeat(padding);
+}
+
+function formatTaskStatus(status: string): string {
+  if (!status) {
+    return chalk.gray('UNKNOWN');
+  }
+  const colors: Record<string, (text: string) => string> = {
+    queued: chalk.yellow,
+    running: chalk.blue,
+    completed: chalk.green,
+    failed: chalk.red
+  };
+  return (colors[status] || chalk.gray)(status.toUpperCase());
+}
+
+function formatTask(task: Task & { typeName?: string }): string {
+  let output = `\n${chalk.bold('Task:')} ${task.id}\n`;
+  output += `${chalk.gray('Status:')} ${formatTaskStatus(task.status)}\n`;
+  output += `${chalk.gray('Type ID:')} ${task.typeId}\n`;
+  if (task.typeName) {
+    output += `${chalk.gray('Type Name:')} ${task.typeName}\n`;
+  }
+  output += `${chalk.gray('Created:')} ${task.createdAt.toLocaleString()}\n`;
+
+  if (task.assignedTo) {
+    output += `${chalk.gray('Assigned to:')} ${task.assignedTo}\n`;
+    output += `${chalk.gray('Assigned at:')} ${task.assignedAt?.toLocaleString()}\n`;
+  }
+
+  if (task.retryCount !== undefined) {
+    output += `${chalk.gray('Retry count:')} ${task.retryCount}/${task.maxRetries || '?'}\n`;
+  }
+
+  if (task.description) {
+    output += `\n${chalk.bold('Description:')}\n${task.description}\n`;
+  }
+
+  if (task.variables && Object.keys(task.variables).length > 0) {
+    output += `\n${chalk.bold('Variables:')}\n`;
+    for (const [key, value] of Object.entries(task.variables)) {
+      output += `  ${key}: ${value}\n`;
+    }
+  }
+
+  if (task.instructions) {
+    output += `\n${chalk.bold('Instructions:')}\n${task.instructions}\n`;
+  }
+
+  return output;
+}
+
+function formatTaskList(tasks: (Task & { typeName?: string })[], pagination?: any): string {
+  let output = `\n${chalk.bold('Tasks:')} (${tasks.length})\n`;
+  
+  if (pagination) {
+    output += chalk.gray(`Showing ${pagination.rangeStart}-${pagination.rangeEnd} of ${pagination.total} tasks`);
+    if (pagination.hasMore) {
+      output += chalk.gray(' (more available)');
+    }
+    output += '\n';
+  }
+  
+  output += '\n';
+  
+  const taskIds = tasks.map(t => t.id.substring(0, 10));
+  const typeNames = tasks.map(t => t.typeName || t.typeId || '-');
+  const assignedTos = tasks.map(t => t.assignedTo || '-');
+  const createdTimes = tasks.map(t => formatRelativeTime(t.createdAt));
+  
+  const taskIdWidth = Math.max(...taskIds.map(id => id.length), 'TASK ID'.length);
+  const typeWidth = Math.max(...typeNames.map(type => type.length), 'TYPE'.length);
+  const statusValues = ['queued', 'running', 'completed', 'failed'];
+  const statusWidth = Math.max(...statusValues.map(s => s.toUpperCase().length), 'STATUS'.length);
+  const assignedWidth = Math.max(...assignedTos.map(a => a.length), 'ASSIGNED TO'.length);
+  const createdWidth = Math.max(...createdTimes.map(c => c.length), 'CREATED'.length);
+  
+  output += chalk.bold(
+    'TASK ID'.padEnd(taskIdWidth) + ' | ' +
+    'TYPE'.padEnd(typeWidth) + ' | ' +
+    'STATUS'.padEnd(statusWidth) + ' | ' +
+    'ASSIGNED TO'.padEnd(assignedWidth) + ' | ' +
+    'CREATED'.padEnd(createdWidth)
+  ) + '\n';
+  output += chalk.gray('-'.repeat(taskIdWidth + 3 + typeWidth + 3 + statusWidth + 3 + assignedWidth + 3 + createdWidth)) + '\n';
+  
+  for (const task of tasks) {
+    const taskId = task.id.substring(0, 10); 
+    const taskType = task.typeName || task.typeId || '-';
+    const status = formatTaskStatus(task.status);
+    const assignedTo = task.assignedTo || '-';
+    const created = formatRelativeTime(task.createdAt);
+    
+    output += taskId.padEnd(taskIdWidth) + ' | ' +
+              taskType.padEnd(typeWidth) + ' | ' +
+              padEndVisual(status, statusWidth) + ' | ' +
+              assignedTo.padEnd(assignedWidth) + ' | ' +
+              created.padEnd(createdWidth) + '\n';
+  }
+  
+  if (pagination && pagination.limit < pagination.total) {
+    const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+    const totalPages = Math.ceil(pagination.total / pagination.limit);
+    output += '\n' + chalk.gray(`Page ${currentPage} of ${totalPages}`);
+  }
+  
+  return output;
+}
+
+function formatBulkCreateResults(data: any): string {
+  let output = `\n${chalk.bold('Bulk Task Creation Results:')}\n`;
+  output += `${chalk.gray('Total Created:')} ${chalk.green(data.totalCreated || 0)}\n`;
+  output += `${chalk.gray('Total Skipped:')} ${chalk.yellow(data.totalSkipped || 0)}\n`;
+  output += `${chalk.gray('Total Failed:')} ${chalk.red(data.totalFailed || 0)}\n`;
+  
+  if (data.tasks && data.tasks.length > 0) {
+    output += `\n${chalk.bold('Created Tasks:')}\n`;
+    for (const task of data.tasks.slice(0, 10)) {
+      output += `  ${task.id} (${task.typeName || task.typeId})\n`;
+    }
+    if (data.tasks.length > 10) {
+      output += `  ... and ${data.tasks.length - 10} more\n`;
+    }
+  }
+  
+  return output;
+}
 
 // Create Task Command
 const createTaskParams = [
@@ -47,14 +207,23 @@ const createTaskParams = [
     description: 'Variables as JSON string for template tasks',
     alias: ['vars']
   }
-] as const;
+] as const satisfies CommandParameter[];
 
-export const createTask: CommandDefinition<typeof createTaskParams> = {
+export const createTask = defineCommand({
   name: 'createTask',
   mcpName: 'create_task',
   cliName: 'create-task',
   description: 'Create a single work item/task for agents to execute. Use this for individual tasks, one-off work items, or when you need precise control over each task. For creating many similar tasks, consider using create_tasks_bulk with a task template instead.',
   parameters: createTaskParams,
+  returnDataType: 'single',
+  formatResult: (result, args) => {
+    if (!result.success) {
+      return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
+    }
+    
+    const task = result.data?.task;
+    return formatTask(task!);
+  },
   async handler(context, args) {
     // Find project
     const projects = await context.project.listProjects(true);
@@ -87,6 +256,14 @@ export const createTask: CommandDefinition<typeof createTaskParams> = {
       }
     } else {
       taskType = taskTypes[0];
+    }
+
+    // TypeScript assertion: taskType is guaranteed to be defined here
+    if (!taskType) {
+      return {
+        success: false,
+        error: 'Task type is required but not found'
+      };
     }
 
     // Handle template vs non-template tasks
@@ -123,19 +300,13 @@ export const createTask: CommandDefinition<typeof createTaskParams> = {
 
     return {
       success: true,
-      data: {
-        id: task.id,
-        projectId: task.projectId,
-        typeId: task.typeId,
-        instructions: task.instructions,
-        status: task.status,
-        createdAt: task.createdAt,
-        variables: task.variables
-      },
+      data: task,
       message: 'Task created successfully'
-    };
+    } satisfies CommandResult<Task>;
   }
-};
+});
+
+export type CreateTaskTypes = TaskTypes<typeof createTask>;
 
 // Create Tasks Bulk Command
 const createTasksBulkParams = [
@@ -153,14 +324,22 @@ const createTasksBulkParams = [
     required: true,
     positional: true
   }
-] as const;
+] as const satisfies CommandParameter[];
 
-export const createTasksBulk: CommandDefinition<typeof createTasksBulkParams> = {
+export const createTasksBulk = defineCommand({
   name: 'createTasksBulk',
   mcpName: 'create_tasks_bulk',
   cliName: 'create-tasks-bulk',
   description: 'Create many tasks at once from a JSON array - ideal for batch processing, breaking down large work into many similar tasks, or processing lists of items. Use this when you have many similar tasks to create (e.g., processing multiple files, analyzing multiple documents, or repeating work across datasets).',
   parameters: createTasksBulkParams,
+  returnDataType: 'generic',
+  formatResult: (result, args) => {
+    if (!result.success) {
+      return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
+    }
+    
+    return formatBulkCreateResults(result.data!);
+  },
   async handler(context, args) {
     // Find project
     const projects = await context.project.listProjects(true);
@@ -198,20 +377,13 @@ export const createTasksBulk: CommandDefinition<typeof createTasksBulkParams> = 
 
     return {
       success: true,
-      data: {
-        tasksCreated: result.tasksCreated,
-        errors: result.errors,
-        createdTasks: result.createdTasks.map(t => ({
-          id: t.id,
-          typeId: t.typeId,
-          status: t.status,
-          createdAt: t.createdAt
-        }))
-      },
+      data: result.createdTasks,
       message: `Bulk task creation completed: ${result.tasksCreated} created, ${result.errors.length} errors`
     };
   }
-};
+});
+
+export type CreateTasksBulkTypes = TaskTypes<typeof createTasksBulk>;
 
 // List Tasks Command
 const listTasksParams = [
@@ -226,7 +398,7 @@ const listTasksParams = [
     name: 'status',
     type: 'string',
     description: 'Filter by task status',
-    choices: ['queued', 'running', 'completed', 'failed'],
+    choices: ['queued', 'running', 'completed', 'failed', 'all'],
     alias: 's'
   },
   {
@@ -242,6 +414,13 @@ const listTasksParams = [
     alias: ['assigned-to', 'a']
   },
   {
+    name: 'includeCompleted',
+    type: 'boolean',
+    description: 'Include completed tasks',
+    alias: ['include-completed', 'c'],
+    default: false
+  },
+  {
     name: 'limit',
     type: 'number',
     description: 'Maximum number of tasks to return (0 = no limit)',
@@ -255,14 +434,24 @@ const listTasksParams = [
     alias: 'o',
     default: 0
   }
-] as const;
+] as const satisfies CommandParameter[];
 
-export const listTasks: CommandDefinition<typeof listTasksParams> = {
+export const listTasks = defineCommand({
   name: 'listTasks',
   mcpName: 'list_tasks',
   cliName: 'list-tasks',
-  description: 'List and filter tasks in a project by status, type, or assigned agent. Use this to monitor task progress, find specific tasks, check what work is queued/completed, or track task assignment status. Essential for workflow monitoring and progress tracking.',
+  description: 'List and filter tasks in a project by status, type, or assigned agent. By default, excludes completed tasks to focus on active work - use status="all" or includeCompleted=true to see completed tasks. Essential for workflow monitoring and progress tracking.',
   parameters: listTasksParams,
+  returnDataType: 'list',
+  formatResult: (result, args) => {
+    if (!result.success) {
+      return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
+    }
+    
+    const tasks = result.data?.tasks || [];
+    const pagination = result.data?.pagination;
+    return formatTaskList(tasks, pagination);
+  },
   async handler(context, args) {
     // Validate limit parameter
     if (args.limit !== undefined && args.limit < 0) {
@@ -282,18 +471,17 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
       };
     }
 
+    // Handle status filtering with new logic
+    const includeCompleted = args.status === 'all' || args.status === 'completed' || args.includeCompleted;
+    
     const filters = {
-      status: args.status,
+      status: args.status === 'all' ? undefined : args.status,
       typeId: args.type, // Convert type to typeId for storage layer
       assignedTo: args.assignedTo,
       limit: args.limit,
       offset: args.offset
     };
 
-    // Get task types to map typeId to typeName
-    const taskTypes = await context.taskType.listTaskTypes(project.id);
-    const typeMap = new Map(taskTypes.map(tt => [tt.id, tt.name]));
-    
     // Get ALL tasks matching the filters (without pagination) to get true total
     const allTasksFilters = {
       status: filters.status,
@@ -302,41 +490,36 @@ export const listTasks: CommandDefinition<typeof listTasksParams> = {
       // No limit/offset for total count
     };
     const allTasks = await context.task.listTasks(project.id, allTasksFilters);
-    const totalCount = allTasks.length;
+    
+    // Filter out completed tasks unless specifically requested
+    const filteredTasks = includeCompleted ? allTasks : allTasks.filter(task => task.status !== 'completed');
+    const totalCount = filteredTasks.length;
     
     // Apply pagination to get the current page (unless limit is 0)
     const offset = filters.offset || 0;
     const limit = filters.limit === 0 ? undefined : (filters.limit || 50);
-    const pagedTasks = limit ? allTasks.slice(offset, offset + limit) : allTasks.slice(offset);
+    const pagedTasks = limit ? filteredTasks.slice(offset, offset + limit) : filteredTasks.slice(offset);
     
-    const rangeStart = totalCount > 0 ? offset + 1 : 0;
-    const rangeEnd = offset + pagedTasks.length;
-    const hasMore = limit ? rangeEnd < totalCount : false;
+    // Populate instructions for each task from templates if needed
+    const tasksWithInstructions = await Promise.all(
+      pagedTasks.map(async (task) => {
+        const instructions = await context.task.getTaskInstructions(task.id);
+        return {
+          ...task,
+          instructions
+        };
+      })
+    );
 
     return {
       success: true,
-      data: {
-        tasks: pagedTasks.map(t => ({
-          id: t.id,
-          typeId: t.typeId,
-          typeName: typeMap.get(t.typeId) || t.typeId,
-          status: t.status,
-          assignedTo: t.assignedTo,
-          retryCount: t.retryCount,
-          createdAt: t.createdAt
-        })),
-        pagination: {
-          total: totalCount,
-          offset: offset,
-          limit: limit || totalCount, // Show actual limit or total if no limit
-          rangeStart: rangeStart,
-          rangeEnd: rangeEnd,
-          hasMore: hasMore
-        }
-      }
+      data: tasksWithInstructions,
+      message: `Found ${tasksWithInstructions.length} tasks (${totalCount} total)`
     };
   }
-};
+});
+
+export type ListTasksTypes = TaskTypes<typeof listTasks>;
 
 // Get Task Command
 const getTaskParams = [
@@ -347,14 +530,23 @@ const getTaskParams = [
     required: true,
     positional: true
   }
-] as const;
+] as const satisfies CommandParameter[];
 
-export const getTask: CommandDefinition<typeof getTaskParams> = {
+export const getTask = defineCommand({
   name: 'getTask',
   mcpName: 'get_task',
   cliName: 'get-task',
   description: 'Get detailed information about a specific task including its status, instructions, variables, assignment info, and execution history. Use this to check task details, verify task configuration, or troubleshoot task issues.',
   parameters: getTaskParams,
+  returnDataType: 'single',
+  formatResult: (result, args) => {
+    if (!result.success) {
+      return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
+    }
+    
+    const task = result.data;
+    return formatTask(task!);
+  },
   async handler(context, args) {
     const task = await context.task.getTask(args.taskId);
     if (!task) {
@@ -367,24 +559,17 @@ export const getTask: CommandDefinition<typeof getTaskParams> = {
     // Get full instructions (interpolated from template if needed)
     const instructions = await context.task.getTaskInstructions(args.taskId);
 
+    // Return the task with populated instructions
+    const taskWithInstructions = {
+      ...task,
+      instructions
+    };
+
     return {
       success: true,
-      data: {
-        id: task.id,
-        projectId: task.projectId,
-        typeId: task.typeId,
-        instructions: instructions,
-        status: task.status,
-        assignedTo: task.assignedTo,
-        createdAt: task.createdAt,
-        assignedAt: task.assignedAt,
-        completedAt: task.completedAt,
-        variables: task.variables,
-        retryCount: task.retryCount,
-        maxRetries: task.maxRetries,
-        leaseExpiresAt: task.leaseExpiresAt,
-        result: task.result
-      }
+      data: taskWithInstructions
     };
   }
-};
+});
+
+export type GetTaskTypes = TaskTypes<typeof getTask>;

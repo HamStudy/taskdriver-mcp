@@ -97,7 +97,7 @@ export class LeaseService {
       throw new Error(`Task ${taskId} is not running`);
     }
 
-    const currentExpiry = task.leaseExpiresAt || new Date();
+    const currentExpiry = task.leaseExpiresAt ? new Date(task.leaseExpiresAt) : new Date();
     const newExpiry = new Date(currentExpiry.getTime() + extensionMinutes * 60 * 1000);
 
     await this.storage.updateTask(taskId, {

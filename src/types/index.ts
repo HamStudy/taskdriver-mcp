@@ -24,14 +24,52 @@ export interface ApiResponse<T> {
 export interface ValidationError {
   field: string;
   message: string;
-  value?: any;
+  value?: string | number | boolean | object | null;
+}
+
+// Error handling types and utilities
+export interface ErrorWithMessage {
+  message: string;
+}
+
+export interface ErrorWithCode extends ErrorWithMessage {
+  code: string;
+}
+
+export function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  );
+}
+
+export function isErrorWithCode(error: unknown): error is ErrorWithCode {
+  return (
+    isErrorWithMessage(error) &&
+    'code' in error &&
+    typeof (error as Record<string, unknown>).code === 'string'
+  );
+}
+
+export function toErrorWithMessage(maybeError: unknown): ErrorWithMessage {
+  if (isErrorWithMessage(maybeError)) return maybeError;
+  
+  try {
+    return new Error(JSON.stringify(maybeError));
+  } catch {
+    // fallback in case there's an error stringifying the maybeError
+    // like with circular references for example.
+    return new Error(String(maybeError));
+  }
 }
 
 // Storage and service types
 export interface StorageConfig {
   provider: 'file' | 'mongodb' | 'redis';
   connectionString?: string;
-  options?: Record<string, any>;
+  options?: Record<string, unknown>;
 }
 
 export interface ServerConfig {

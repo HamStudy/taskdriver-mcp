@@ -4,6 +4,7 @@
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { Project, TaskType } from '../types';
 
 /**
  * Reads content from a file path if the value starts with '@', otherwise returns the value as-is
@@ -24,14 +25,14 @@ export function readContentFromFileOrValue(value: string): string {
 /**
  * Find project by name or ID from a list of projects
  */
-export function findProjectByNameOrId(projects: any[], nameOrId: string) {
+export function findProjectByNameOrId<P extends Pick<Project, 'name' | 'id'>>(projects: P[], nameOrId: string) {
   return projects.find(p => p.name === nameOrId || p.id === nameOrId);
 }
 
 /**
  * Find task type by name or ID from a list of task types
  */
-export function findTaskTypeByNameOrId(taskTypes: any[], nameOrId: string) {
+export function findTaskTypeByNameOrId<T extends Pick<TaskType, 'name' | 'id'>>(taskTypes: T[], nameOrId: string) {
   return taskTypes.find(tt => tt.name === nameOrId || tt.id === nameOrId);
 }
 

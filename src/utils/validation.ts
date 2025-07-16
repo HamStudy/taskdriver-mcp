@@ -117,7 +117,7 @@ export const createTaskTypeSchema = Joi.object({
   variables: Joi.array().items(Joi.string().pattern(/^[a-zA-Z][a-zA-Z0-9_]*$/)).max(20).optional(),
   duplicateHandling: Joi.string().valid('ignore', 'fail', 'allow').default('allow'),
   maxRetries: Joi.number().integer().min(0).max(10).optional(),
-  leaseDurationMinutes: Joi.number().integer().min(1).max(1440).optional(),
+  leaseDurationMinutes: Joi.number().min(0.1).max(1440).optional(),
 }).custom((value, helpers) => {
   // If variables are provided, validate they match the template
   if (value.variables && value.template) {

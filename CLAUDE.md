@@ -8,6 +8,8 @@ TaskDriver is an MCP (Model Context Protocol) server for managing and orchestrat
 
 ## Development Commands
 
+NEVER USE `npm` or `node` - use `bun` for everything. This is not a node.js project.
+
 ### Build and Development
 ```bash
 bun install              # Install dependencies
@@ -43,8 +45,270 @@ bun test test/mcp/server.test.ts          # MCP server tests
 
 ### Installation and CLI
 ```bash
-npm install -g .        # Install CLI globally
+bun install -g .        # Install CLI globally
 taskdriver --help       # Use installed CLI
+```
+
+## Test Driven Development Rules
+
+### Core Principles
+- **Tests are the specification** - they define expected behavior, not implementation details
+- **All tests must pass** - A failing test anywhere indicates broken assumptions or real bugs
+- **Test failures are ALWAYS relevant** - Code changes can have cascading effects through the system
+
+### Mandatory TDD Workflow
+1. **Before ANY work**: `bun test` → must be green
+2. **During work**: Write test FIRST, watch it fail, then implement
+3. **Before considering done**: `bun test` → must be green
+4. **If any test fails**: Stop and fix - the failure reveals a problem you missed
+5. **Before ANY commit**: `bun test` → must be green
+
+### Writing Better Tests in TypeScript
+
+#### Use Real Implementations Over Mocks
+```typescript
+// BAD: Over-mocking that doesn't test real behavior
+const mockStorage = jest.fn();
+const mockLogger = jest.fn();
+const service = new TaskService(mockStorage as any, mockLogger as any);
+
+// GOOD: Real implementations with test doubles only for external dependencies
+const storage = new FileStorageProvider(testDataDir);
+const logger = createTestLogger(); // Real logger with test output
+const service = new TaskService(storage, logger);
+```
+
+#### Test User Outcomes, Not Implementation
+```typescript
+// USELESS: Testing that defaults haven't changed
+it('should have default lease timeout of 300', () => {
+  const task = new Task();
+  expect(task.leaseTimeout).toBe(300);
+});
+
+// USEFUL: Testing behavior with defaults
+it('should expire task leases after configured timeout', async () => {
+  const task = await taskService.createTask({ type: 'process-data' });
+  const lease = await leaseService.acquireLease(task.id);
+  
+  await advanceTime(301); // Past default timeout
+  await reaperService.processExpiredLeases();
+  
+  const updatedTask = await taskService.getTask(task.id);
+  expect(updatedTask.status).toBe('pending'); // Available again
+});
+```
+
+#### Test Configuration Flow, Not Magic Numbers
+```typescript
+// BAD: Testing hardcoded values
+it('should have batchSize of 100', () => {
+  expect(config.batchSize).toBe(100);
+});
+
+// GOOD: Testing configuration is properly wired
+it('should use batch size from environment config', () => {
+  process.env.TASKDRIVER_BATCH_SIZE = '50';
+  const config = loadConfig();
+  const processor = new BatchProcessor(config);
+  
+  expect(processor.batchSize).toBe(50);
+  expect(processor.batchSize).toBe(config.batchSize);
+});
+```
+
+#### Integration Over Isolation
+```typescript
+// BETTER: Test real workflows across service boundaries
+describe('Task Assignment Flow', () => {
+  let storage: StorageProvider;
+  let projectService: ProjectService;
+  let taskService: TaskService;
+  let agentService: AgentService;
+  
+  beforeEach(async () => {
+    storage = new FileStorageProvider(testDataDir);
+    projectService = new ProjectService(storage);
+    taskService = new TaskService(storage);
+    agentService = new AgentService(storage, taskService);
+  });
+  
+  it('should atomically assign tasks to agents', async () => {
+    const project = await projectService.create({ name: 'test-project' });
+    const agent = await agentService.register(project.id, { name: 'agent-1' });
+    const task = await taskService.create(project.id, { 
+      type: 'process', 
+      data: { file: 'test.csv' } 
+    });
+    
+    // Test atomic assignment
+    const assigned = await agentService.requestTask(project.id, agent.id);
+    expect(assigned?.id).toBe(task.id);
+    
+    // Verify no double assignment
+    const secondRequest = await agentService.requestTask(project.id, agent.id);
+    expect(secondRequest).toBeNull();
+  });
+});
+```
+
+#### Async/Promise Testing Patterns
+```typescript
+// Always use async/await for clarity
+it('should handle storage failures gracefully', async () => {
+  const brokenStorage = new BrokenStorageProvider();
+  const service = new TaskService(brokenStorage);
+  
+  await expect(service.create(projectId, taskData))
+    .rejects.toThrow(StorageError);
+});
+
+// Test specific error types and retry behavior
+it('should retry transient failures', async () => {
+  let attempts = 0;
+  storage.save = jest.fn().mockImplementation(async () => {
+    attempts++;
+    if (attempts < 3) throw new TransientError('Network timeout');
+    return { id: '123' };
+  });
+  
+  const result = await taskService.createWithRetry(projectId, taskData);
+  expect(result.id).toBe('123');
+  expect(attempts).toBe(3);
+});
+```
+
+### TaskDriver-Specific Testing Patterns
+
+#### Test Storage Provider Contracts
+```typescript
+// All storage providers must pass the same behavioral tests
+['file', 'mongodb', 'redis'].forEach(providerType => {
+  describe(`${providerType} storage provider`, () => {
+    let provider: StorageProvider;
+    
+    beforeEach(() => {
+      provider = createStorageProvider(providerType, testConfig);
+    });
+    
+    it('should atomically assign tasks', async () => {
+      // Same test for all providers ensures consistent behavior
+      const task = await provider.save('tasks', createTestTask());
+      const assigned = await provider.findOneAndUpdate(
+        'tasks',
+        { id: task.id, status: 'pending' },
+        { status: 'assigned', agentId: 'agent-1' }
+      );
+      
+      expect(assigned?.agentId).toBe('agent-1');
+      
+      // Verify atomicity - second assignment should fail
+      const secondAssign = await provider.findOneAndUpdate(
+        'tasks',
+        { id: task.id, status: 'pending' },
+        { status: 'assigned', agentId: 'agent-2' }
+      );
+      
+      expect(secondAssign).toBeNull();
+    });
+  });
+});
+```
+
+#### Test MCP Tool Behavior
+```typescript
+// Test tools handle real-world input correctly
+describe('MCP Tools', () => {
+  it('should accept type parameter for task creation', async () => {
+    const result = await handlers.createTask({
+      projectId: 'test-project',
+      type: 'data-processing', // NOT typeId
+      data: { source: 'api' }
+    });
+    
+    expect(result.content[0].text).toContain('created successfully');
+  });
+  
+  it('should handle malformed input gracefully', async () => {
+    const result = await handlers.createTask({
+      projectId: 'test-project',
+      typeId: 'wrong-param' // Common mistake
+    });
+    
+    expect(result.content[0].text).toContain('type parameter is required');
+  });
+});
+```
+
+### Red Flags to Avoid
+- ❌ Testing that specific values haven't changed (magic number tests)
+- ❌ Using `as any` to bypass TypeScript in tests
+- ❌ Mocking internal modules instead of using real implementations
+- ❌ Changing tests to match new behavior without understanding why they failed
+- ❌ Skipping "unrelated" test failures
+- ❌ Writing tests after implementation
+- ❌ Testing private methods or internal state
+- ❌ Tests that mirror class/file structure instead of user workflows
+
+### Test Organization
+```typescript
+// Organize by user workflows and features, not by code structure
+describe('Task Processing', () => {
+  describe('when agent requests work', () => {
+    describe('with available tasks', () => {
+      it('should assign highest priority task first', async () => {});
+      it('should respect task type filtering', async () => {});
+    });
+    
+    describe('with no available tasks', () => {
+      it('should return null without blocking', async () => {});
+    });
+    
+    describe('when task processing fails', () => {
+      it('should retry according to retry policy', async () => {});
+      it('should eventually mark task as failed', async () => {});
+    });
+  });
+});
+```
+
+### Debugging Test Failures
+When a test fails unexpectedly:
+1. **Read the test name** - understand what behavior it's verifying
+2. **Check the assertion** - what specific outcome was expected?
+3. **Trace the data flow** - how could your changes affect this path?
+4. **Run in isolation** - `bun test path/to/specific.test.ts`
+5. **Add console.logs** - but remove them before committing
+6. **Fix the root cause** - not just the test
+
+Remember: If a test is failing, it's telling you something important about your changes that you missed.
+
+## TypeScript Language Server Tools
+
+Use these MCP tools for safe refactoring and type checking:
+- **diagnostics** - Check for TypeScript errors (run BEFORE tests!)
+- **references** - Find all usages before changing anything
+- **rename_symbol** - Safe renaming (never use find/replace)
+- **hover** - Get type info and documentation
+- **definition** - Jump to source
+- **edit_file** - Apply multiple edits atomically
+
+### Critical Workflow Rules
+
+1. **Always run diagnostics before tests** - Type errors cause confusing test failures
+2. **Always check references before modifying** - See impact across codebase
+3. **Always use rename_symbol for renames** - Updates imports and types correctly
+
+### Quick Examples
+```typescript
+// Before changing any function/interface
+mcp__language-server__references on the symbol
+
+// When tests fail mysteriously
+mcp__language-server__diagnostics src/services/TaskService.ts
+
+// Safe refactoring
+mcp__language-server__rename_symbol createTask -> createNewTask
 ```
 
 ## Architecture Overview
@@ -124,6 +388,8 @@ Handles agent failures gracefully:
 - Monitoring (status, metrics, health)
 
 All tools have JSON schemas and comprehensive validation.
+
+All tools output human-readable text responses with structured data, but also have an option that can be provided to return raw JSON for programmatic use.
 
 ### MCP Prompts (`src/prompts/`)
 5 workflow prompts that appear as slash commands in Claude Code:
@@ -211,7 +477,16 @@ Tests use temporary directories that are automatically cleaned up:
 
 No manual cleanup required - handled by test teardown.
 
-## Typescript Development Guidelines
+## TypeScript Development Guidelines
 
 ### Type System Principles
-- Typescript should always use the correct types when possible, typecasting to `any` or `unknown` should not be done without explicit instructions from the user
+- TypeScript should always use the correct types when possible, typecasting to `any` or `unknown` should not be done without explicit instructions from the user
+- Prefer type inference where possible, but be explicit with function parameters and return types
+- Use strict null checks and handle undefined cases properly
+- Leverage TypeScript's type system to catch errors at compile time, not runtime
+
+### Response Format
+- All commands (both MCP and CLI) should by default return human-readable text
+- An option to return JSON format should be available instead if desired
+- When returning a JSON response, the system will directly return the result from the handler() 
+- For human-readable responses, the output of the handler should be passed into the formatResult function on the defined command to format it nicely for return
