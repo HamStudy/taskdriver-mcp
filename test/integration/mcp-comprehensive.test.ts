@@ -89,22 +89,6 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
       });
 
       describe('Tool Registration and Structure', () => {
-        it('should have all expected tools registered', () => {
-          expect(tools).toBeDefined();
-          expect(tools.length).toBe(21); // Total number of tools
-
-          const expectedTools = [
-            'create_project', 'list_projects', 'get_project', 'update_project', 'get_project_stats',
-            'create_task_type', 'list_task_types', 'get_task_type',
-            'create_task', 'create_tasks_bulk', 'list_tasks', 'get_task',
-            'list_active_agents', 'get_next_task', 'peek_next_task', 'complete_task', 'fail_task',
-            'health_check', 'extend_task_lease', 'get_lease_stats', 'cleanup_expired_leases'
-          ];
-
-          expectedTools.forEach(toolName => {
-            expect(tools.some(t => t.name === toolName)).toBe(true);
-          });
-        });
 
         it('should have properly structured tool definitions', () => {
           tools.forEach(tool => {

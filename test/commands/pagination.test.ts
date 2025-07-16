@@ -338,7 +338,7 @@ describe('Pagination Logic Tests', () => {
       offset: 0
     });
 
-    const formatted = formatCommandResult(result, 'list-tasks', 'human');
+    const formatted = formatCommandResult(result, 'list-tasks', 'human', {});
     expect(formatted.text).toContain('Page (1) of (3)');
     
     // Test second page (offset 10, limit 10) - should be page 2 of 3
@@ -348,7 +348,7 @@ describe('Pagination Logic Tests', () => {
       offset: 10
     });
 
-    const formatted2 = formatCommandResult(result2, 'list-tasks', 'human');
+    const formatted2 = formatCommandResult(result2, 'list-tasks', 'human', {});
     expect(formatted2.text).toContain('Page (2) of (3)');
   });
 });

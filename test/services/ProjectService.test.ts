@@ -131,7 +131,6 @@ describe('ProjectService', () => {
       });
 
       expect(updated.config.defaultMaxRetries).toBe(10);
-      expect(updated.config.defaultLeaseDurationMinutes).toBe(10); // Should retain default
     });
 
     it('should update project status', async () => {

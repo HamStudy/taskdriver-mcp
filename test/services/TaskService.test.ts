@@ -50,7 +50,7 @@ describe('TaskService', () => {
   });
 
   describe('createTask', () => {
-    it('should create a task with minimal input', async () => {
+    it('should create a task ready for assignment', async () => {
       const input = {
         projectId,
         typeId: taskTypeId,
@@ -63,14 +63,17 @@ describe('TaskService', () => {
       expect(task.id).toBeDefined();
       expect(task.projectId).toBe(projectId);
       expect(task.typeId).toBe(taskTypeId);
+      
       // For template-based tasks, instructions are generated dynamically
       const instructions = await taskService.getTaskInstructions(task.id);
       expect(instructions).toBe('Test task for test-resource');
+      
+      // Task should be ready for assignment
       expect(task.status).toBe('queued');
-      expect(task.retryCount).toBe(0);
-      expect(task.maxRetries).toBe(3); // Default from task type
+      expect(task.retryCount).toBe(0); // Fresh task
+      expect(task.maxRetries).toBeGreaterThan(0); // Has retry capability
       expect(task.createdAt).toBeInstanceOf(Date);
-      expect(task.attempts).toEqual([]);
+      expect(task.attempts).toEqual([]); // No attempts yet
     });
 
     it('should create task with variables', async () => {

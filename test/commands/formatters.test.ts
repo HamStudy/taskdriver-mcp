@@ -41,7 +41,7 @@ describe('Command Formatters', () => {
         }
       };
 
-      const formatted = formatCommandResult(result, 'create-project', 'json');
+      const formatted = formatCommandResult(result, 'create-project', 'json', {});
       
       expect(formatted.text).toBe(JSON.stringify(result, null, 2));
       expect(formatted.exitCode).toBe(0);
@@ -53,7 +53,7 @@ describe('Command Formatters', () => {
         error: 'Test error'
       };
 
-      const formatted = formatCommandResult(result, 'create-project', 'json');
+      const formatted = formatCommandResult(result, 'create-project', 'json', {});
       
       expect(formatted.text).toBe(JSON.stringify(result, null, 2));
       expect(formatted.exitCode).toBe(1);
@@ -72,7 +72,7 @@ describe('Command Formatters', () => {
       });
 
       // Format the real result
-      const formatted = formatCommandResult(result, 'create-project', 'human');
+      const formatted = formatCommandResult(result, 'create-project', 'human', { verbose: true });
       
       expect(formatted.text).toContain('✅ Project created successfully');
       expect(formatted.text).toContain('test-project');
@@ -95,13 +95,13 @@ describe('Command Formatters', () => {
       });
       
       expect(createResult.success).toBe(true);
-      const projectId = (createResult as any).project.id;
+      const projectId = (createResult as any).data.id;
 
       // Now get the project using actual command handler
       const getResult = await getProject.handler(context, { projectId });
 
       // Format the real result
-      const formatted = formatCommandResult(getResult, 'get-project', 'human');
+      const formatted = formatCommandResult(getResult, 'get-project', 'human', {});
       
       expect(formatted.text).toContain('get-test-project');
       expect(formatted.text).toContain('Get test description');
@@ -136,7 +136,7 @@ describe('Command Formatters', () => {
         ]
       };
 
-      const formatted = formatCommandResult(result, 'list-projects', 'human');
+      const formatted = formatCommandResult(result, 'list-projects', 'human', {});
       
       expect(formatted.text).toContain('Found 2 projects');
       expect(formatted.text).toContain('project-one');
@@ -168,7 +168,7 @@ describe('Command Formatters', () => {
         ]
       };
 
-      const formatted = formatCommandResult(result, 'list-tasks', 'human');
+      const formatted = formatCommandResult(result, 'list-tasks', 'human', {});
       
       expect(formatted.text).toContain('Found 2 tasks');
       expect(formatted.text).toContain('task-1');
@@ -189,7 +189,7 @@ describe('Command Formatters', () => {
         }
       };
 
-      const formatted = formatCommandResult(result, 'health-check', 'human');
+      const formatted = formatCommandResult(result, 'health-check', 'human', {});
       
       expect(formatted.text).toContain('System Status:');
       expect(formatted.text).toContain('HEALTHY');
@@ -204,7 +204,7 @@ describe('Command Formatters', () => {
         error: 'Something went wrong'
       };
 
-      const formatted = formatCommandResult(result, 'create-project', 'human');
+      const formatted = formatCommandResult(result, 'create-project', 'human', {});
       
       expect(formatted.text).toContain('❌ Error:');
       expect(formatted.text).toContain('Something went wrong');
@@ -217,7 +217,7 @@ describe('Command Formatters', () => {
         projects: []
       };
 
-      const formatted = formatCommandResult(result, 'list-projects', 'human');
+      const formatted = formatCommandResult(result, 'list-projects', 'human', {});
       
       expect(formatted.text).toContain('No projects found');
       expect(formatted.exitCode).toBe(0);
@@ -231,7 +231,7 @@ describe('Command Formatters', () => {
         status: 'healthy'
       };
 
-      const formatted = formatCommandResult(result, 'health-check');
+      const formatted = formatCommandResult(result, 'health-check', 'human', {});
       
       expect(formatted.text).toContain('System Status:');
       expect(formatted.text).toContain('HEALTHY');

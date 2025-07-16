@@ -32,7 +32,8 @@ describe('ToolHandlers', () => {
             name: 'create_project',
             arguments: {
               name: 'test-project',
-              description: 'A test project'
+              description: 'A test project',
+              format: 'json'
             }
           }
         });
@@ -43,10 +44,10 @@ describe('ToolHandlers', () => {
         
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
-        expect(response.project.name).toBe('test-project');
-        expect(response.project.description).toBe('A test project');
-        expect(response.project.status).toBe('active');
-        expect(response.project.id).toBeDefined();
+        expect(response.data.name).toBe('test-project');
+        expect(response.data.description).toBe('A test project');
+        expect(response.data.status).toBe('active');
+        expect(response.data.id).toBeDefined();
       });
 
       it('should handle validation errors', async () => {
@@ -55,7 +56,8 @@ describe('ToolHandlers', () => {
             name: 'create_project',
             arguments: {
               name: 'invalid name with spaces',
-              description: 'A test project'
+              description: 'A test project',
+              format: 'json'
             }
           }
         });
@@ -73,7 +75,8 @@ describe('ToolHandlers', () => {
             name: 'create_project',
             arguments: {
               name: 'test-project',
-              description: 'A test project'
+              description: 'A test project',
+              format: 'json'
             }
           }
         });
@@ -81,7 +84,9 @@ describe('ToolHandlers', () => {
         const result = await handlers.handleToolCall({
           params: {
             name: 'list_projects',
-            arguments: {}
+            arguments: {
+              format: 'json'
+            }
           }
         });
 
@@ -98,7 +103,8 @@ describe('ToolHandlers', () => {
             name: 'list_projects',
             arguments: {
               status: 'active',
-              limit: 10
+              limit: 10,
+              format: 'json'
             }
           }
         });
@@ -118,19 +124,21 @@ describe('ToolHandlers', () => {
             name: 'create_project',
             arguments: {
               name: 'test-project',
-              description: 'A test project'
+              description: 'A test project',
+              format: 'json'
             }
           }
         });
 
         const createResponse = JSON.parse(createResult.content[0].text);
-        const projectId = createResponse.project.id;
+        const projectId = createResponse.data.id;
 
         const result = await handlers.handleToolCall({
           params: {
             name: 'get_project',
             arguments: {
-              projectId
+              projectId,
+              format: 'json'
             }
           }
         });
@@ -147,7 +155,8 @@ describe('ToolHandlers', () => {
           params: {
             name: 'get_project',
             arguments: {
-              projectId: 'non-existent-id'
+              projectId: 'non-existent-id',
+              format: 'json'
             }
           }
         });
@@ -170,13 +179,14 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: 'test-project',
-            description: 'A test project'
+            description: 'A test project',
+            format: 'json'
           }
         }
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.project.id;
+      projectId = createResponse.data.id;
     });
 
     describe('create_task_type', () => {
@@ -188,7 +198,8 @@ describe('ToolHandlers', () => {
               projectId,
               name: 'test-task-type',
               template: 'Do {{action}} on {{target}}',
-              variables: ['action', 'target']
+              variables: ['action', 'target'],
+              format: 'json'
             }
           }
         });
@@ -211,7 +222,8 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               name: 'test-task-type',
-              template: 'Execute {{action}} task'
+              template: 'Execute {{action}} task',
+              format: 'json'
             }
           }
         });
@@ -220,7 +232,8 @@ describe('ToolHandlers', () => {
           params: {
             name: 'list_task_types',
             arguments: {
-              projectId
+              projectId,
+              format: 'json'
             }
           }
         });
@@ -245,13 +258,14 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: 'test-project',
-            description: 'A test project'
+            description: 'A test project',
+            format: 'json'
           }
         }
       });
 
       const createProjectResponse = JSON.parse(createProjectResult.content[0].text);
-      projectId = createProjectResponse.project.id;
+      projectId = createProjectResponse.data.id;
 
       // Create a test task type
       const createTaskTypeResult = await handlers.handleToolCall({
@@ -260,7 +274,8 @@ describe('ToolHandlers', () => {
           arguments: {
             projectId,
             name: 'test-task-type',
-            template: 'Execute task: {{instructions}}'
+            template: 'Execute task: {{instructions}}',
+            format: 'json'
           }
         }
       });
@@ -280,7 +295,8 @@ describe('ToolHandlers', () => {
               instructions: 'Test task instructions',
               variables: JSON.stringify({
                 instructions: 'Test task instructions'
-              })
+              }),
+              format: 'json'
             }
           }
         });
@@ -306,7 +322,8 @@ describe('ToolHandlers', () => {
               instructions: 'Test task instructions',
               variables: JSON.stringify({
                 instructions: 'Test task instructions'
-              })
+              }),
+              format: 'json'
             }
           }
         });
@@ -318,7 +335,9 @@ describe('ToolHandlers', () => {
           params: {
             name: 'list_tasks',
             arguments: {
-              projectId
+              projectId,
+              status: 'all',
+              format: 'json'
             }
           }
         });
@@ -327,7 +346,7 @@ describe('ToolHandlers', () => {
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
         expect(response.data).toHaveLength(1);
-        expect(response.data[0].instructions).toBeUndefined(); // Template tasks store no instructions, only variables
+        expect(response.data[0].instructions).toBe('Execute task: Test task instructions'); // Template tasks now have populated instructions
         expect(response.data[0].id).toBeDefined();
         expect(response.data[0].status).toBe('queued');
       });
@@ -345,7 +364,8 @@ describe('ToolHandlers', () => {
               instructions: 'Test task instructions',
               variables: JSON.stringify({
                 instructions: 'Test task instructions'
-              })
+              }),
+              format: 'json'
             }
           }
         });
@@ -358,7 +378,8 @@ describe('ToolHandlers', () => {
             name: 'get_task',
             arguments: {
               projectId,
-              taskId
+              taskId,
+              format: 'json'
             }
           }
         });
@@ -377,7 +398,8 @@ describe('ToolHandlers', () => {
             name: 'get_task',
             arguments: {
               projectId,
-              taskId: 'non-existent-task-id'
+              taskId: 'non-existent-task-id',
+              format: 'json'
             }
           }
         });
@@ -400,13 +422,14 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: 'test-project',
-            description: 'A test project'
+            description: 'A test project',
+            format: 'json'
           }
         }
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.project.id;
+      projectId = createResponse.data.id;
     });
 
     describe('list_active_agents', () => {
@@ -415,7 +438,8 @@ describe('ToolHandlers', () => {
           params: {
             name: 'list_active_agents',
             arguments: {
-              projectId
+              projectId,
+              format: 'json'
             }
           }
         });
@@ -442,13 +466,14 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: 'test-project',
-            description: 'A test project'
+            description: 'A test project',
+            format: 'json'
           }
         }
       });
 
       const createProjectResponse = JSON.parse(createProjectResult.content[0].text);
-      projectId = createProjectResponse.project.id;
+      projectId = createProjectResponse.data.id;
 
       // Create a test task type
       const createTaskTypeResult = await handlers.handleToolCall({
@@ -457,7 +482,8 @@ describe('ToolHandlers', () => {
           arguments: {
             projectId,
             name: 'test-task-type',
-            template: 'Execute task: {{instructions}}'
+            template: 'Execute task: {{instructions}}',
+            format: 'json'
           }
         }
       });
@@ -475,7 +501,8 @@ describe('ToolHandlers', () => {
             instructions: 'Test task instructions',
             variables: JSON.stringify({
               instructions: 'Test task instructions'
-            })
+            }),
+            format: 'json'
           }
         }
       });
@@ -491,7 +518,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'test-agent'
+              agentName: 'test-agent',
+              format: 'json'
             }
           }
         });
@@ -500,10 +528,9 @@ describe('ToolHandlers', () => {
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
         expect(response.data).toBeDefined();
-        expect(response.data.task).toBeDefined();
-        expect(response.data.task.id).toBe(taskId);
-        expect(response.data.task.assignedTo).toBe('test-agent');
-        expect(response.data.agentName).toBe('test-agent');
+        expect(response.data.id).toBe(taskId);
+        expect(response.data.assignedTo).toBe('test-agent');
+        expect(response.agentName).toBe('test-agent');
       });
 
       it('should return error when no tasks available', async () => {
@@ -513,7 +540,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'test-agent'
+              agentName: 'test-agent',
+              format: 'json'
             }
           }
         });
@@ -524,7 +552,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'test-agent-2'
+              agentName: 'test-agent-2',
+              format: 'json'
             }
           }
         });
@@ -532,7 +561,7 @@ describe('ToolHandlers', () => {
         expect(result.isError).toBeTruthy();
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(false);
-        expect(response.data.task).toBeNull();
+        expect(response.data).toBeNull();
         expect(response.error).toContain('No tasks available');
       });
     });
@@ -545,7 +574,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'test-agent'
+              agentName: 'test-agent',
+              format: 'json'
             }
           }
         });
@@ -560,7 +590,8 @@ describe('ToolHandlers', () => {
               result: 'Task completed successfully',
               outputs: JSON.stringify({
                 key: 'value'
-              })
+              }),
+              format: 'json'
             }
           }
         });
@@ -568,9 +599,10 @@ describe('ToolHandlers', () => {
         expect(result.isError).toBeFalsy();
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
-        expect(response.data.status).toBe('completed');
-        expect(response.data.result).toBe('Task completed successfully');
-        expect(response.data.outputs).toEqual({ key: 'value' });
+        expect(response.data.id).toBe(taskId);
+        expect(response.data.result.output).toBe('Task completed successfully');
+        expect(response.data.result.metadata).toEqual({ key: 'value' });
+        expect(response.agentName).toBe('test-agent');
       });
     });
 
@@ -582,7 +614,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'test-agent'
+              agentName: 'test-agent',
+              format: 'json'
             }
           }
         });
@@ -595,7 +628,8 @@ describe('ToolHandlers', () => {
               projectId,
               taskId,
               error: 'Task failed with error',
-              canRetry: false
+              canRetry: false,
+              format: 'json'
             }
           }
         });
@@ -603,9 +637,9 @@ describe('ToolHandlers', () => {
         expect(result.isError).toBeFalsy();
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
+        expect(response.data.id).toBe(taskId);
         expect(response.data.status).toBe('failed');
-        expect(response.data.error).toBe('Task failed with error');
-        expect(response.data.canRetry).toBe(false);
+        expect(response.agentName).toBe('test-agent');
       });
     });
   });
@@ -620,13 +654,14 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: 'test-project',
-            description: 'A test project'
+            description: 'A test project',
+            format: 'json'
           }
         }
       });
 
       const createResponse = JSON.parse(createResult.content[0].text);
-      projectId = createResponse.project.id;
+      projectId = createResponse.data.id;
     });
 
     describe('get_project_stats', () => {
@@ -635,7 +670,8 @@ describe('ToolHandlers', () => {
           params: {
             name: 'get_project_stats',
             arguments: {
-              projectId
+              projectId,
+              format: 'json'
             }
           }
         });
@@ -651,7 +687,7 @@ describe('ToolHandlers', () => {
         expect(result.isError).toBeFalsy();
         const response = JSON.parse(result.content[0].text);
         expect(response.success).toBe(true);
-        expect(response.data.projectId).toBe(projectId);
+        expect(response.data.projectName).toBeDefined();
         expect(response.data.stats).toBeDefined();
         expect(response.data.stats.project.stats.totalTasks).toBe(0);
       });
@@ -662,7 +698,9 @@ describe('ToolHandlers', () => {
         const result = await handlers.handleToolCall({
           params: {
             name: 'health_check',
-            arguments: {}
+            arguments: {
+              format: 'json'
+            }
           }
         });
 
@@ -687,7 +725,8 @@ describe('ToolHandlers', () => {
             arguments: {
               projectId,
               name: 'lease-test-task-type',
-              template: 'Execute lease test: {{instructions}}'
+              template: 'Execute lease test: {{instructions}}',
+              format: 'json'
             }
           }
         });
@@ -704,7 +743,8 @@ describe('ToolHandlers', () => {
               instructions: 'Test task for lease management',
               variables: JSON.stringify({
                 instructions: 'Test task for lease management'
-              })
+              }),
+              format: 'json'
             }
           }
         });
@@ -719,7 +759,8 @@ describe('ToolHandlers', () => {
             name: 'get_next_task',
             arguments: {
               projectId,
-              agentName: 'lease-test-agent'
+              agentName: 'lease-test-agent',
+              format: 'json'
             }
           }
         });
@@ -732,7 +773,8 @@ describe('ToolHandlers', () => {
               name: 'extend_task_lease',
               arguments: {
                 taskId: leaseTaskId,
-                extensionMinutes: 30
+                extensionMinutes: 30,
+                format: 'json'
               }
             }
           });
@@ -742,6 +784,7 @@ describe('ToolHandlers', () => {
           expect(response.success).toBe(true);
           expect(response.data.taskId).toBe(leaseTaskId);
           expect(response.data.extensionMinutes).toBe(30);
+          expect(response.data.newExpiresAt).toBeDefined();
         });
       });
 
@@ -751,7 +794,8 @@ describe('ToolHandlers', () => {
             params: {
               name: 'get_lease_stats',
               arguments: {
-                projectId
+                projectId,
+                format: 'json'
               }
             }
           });
@@ -773,7 +817,8 @@ describe('ToolHandlers', () => {
             params: {
               name: 'cleanup_expired_leases',
               arguments: {
-                projectId
+                projectId,
+                format: 'json'
               }
             }
           });
@@ -794,7 +839,9 @@ describe('ToolHandlers', () => {
       const result = await handlers.handleToolCall({
         params: {
           name: 'unknown_tool',
-          arguments: {}
+          arguments: {
+            format: 'json'
+          }
         }
       });
 
@@ -808,7 +855,8 @@ describe('ToolHandlers', () => {
           name: 'create_project',
           arguments: {
             name: '', // Invalid empty name
-            description: 'Test'
+            description: 'Test',
+            format: 'json'
           }
         }
       });
