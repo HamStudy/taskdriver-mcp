@@ -1,6 +1,6 @@
 {
   "name": "taskdriver-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "MCP server for managing and orchestrating LLM agents as task runners",
   "main": "dist/cli.js",
   "module": "dist/cli.js",
