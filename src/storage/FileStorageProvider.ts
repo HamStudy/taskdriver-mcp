@@ -778,7 +778,7 @@ export class FileStorageProvider extends BaseStorageProvider {
       const expiredTasks = data.tasks.filter(t => 
         t.status === 'running' && 
         t.leaseExpiresAt && 
-        t.leaseExpiresAt <= now
+        t.leaseExpiresAt.getTime() <= now.getTime()
       );
       
       let reclaimedCount = 0;
@@ -814,7 +814,7 @@ export class FileStorageProvider extends BaseStorageProvider {
           t.assignedTo === agentName && 
           t.status === 'running' && 
           t.leaseExpiresAt && 
-          t.leaseExpiresAt > now
+          t.leaseExpiresAt.getTime() > now.getTime()
         );
         
         if (existingTask) {
@@ -1097,7 +1097,7 @@ export class FileStorageProvider extends BaseStorageProvider {
       const agentMap = new Map<string, AgentStatus>();
       
       for (const task of data.tasks) {
-        if (task.status === 'running' && task.assignedTo && task.leaseExpiresAt && task.leaseExpiresAt > now) {
+        if (task.status === 'running' && task.assignedTo && task.leaseExpiresAt && task.leaseExpiresAt.getTime() > now.getTime()) {
           if (!agentMap.has(task.assignedTo)) {
             agentMap.set(task.assignedTo, {
               name: task.assignedTo,
@@ -1134,7 +1134,7 @@ export class FileStorageProvider extends BaseStorageProvider {
         t.status === 'running' && 
         t.assignedTo === agentName && 
         t.leaseExpiresAt && 
-        t.leaseExpiresAt > now
+        t.leaseExpiresAt.getTime() > now.getTime()
       );
       
       if (!activeTask) {
@@ -1369,7 +1369,7 @@ export class FileStorageProvider extends BaseStorageProvider {
     
     return tasks.filter(task => 
       task.status === 'queued' || 
-      (task.status === 'running' && task.leaseExpiresAt && task.leaseExpiresAt < now)
+      (task.status === 'running' && task.leaseExpiresAt && task.leaseExpiresAt.getTime() < now.getTime())
     ).length;
   }
 

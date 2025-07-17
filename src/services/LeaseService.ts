@@ -28,7 +28,7 @@ export class LeaseService {
 
       const now = new Date();
       const expiredTasks = runningTasks.filter(task => 
-        task.leaseExpiresAt && task.leaseExpiresAt < now
+        task.leaseExpiresAt && task.leaseExpiresAt.getTime() <= now.getTime()
       );
       
       // Log cleanup operation for debugging
@@ -156,7 +156,7 @@ export class LeaseService {
 
     const runningTasks = allTasks.filter(task => task.status === 'running');
     const expiredTasks = runningTasks.filter(task => 
-      task.leaseExpiresAt && task.leaseExpiresAt < now
+      task.leaseExpiresAt && task.leaseExpiresAt.getTime() <= now.getTime()
     );
 
     return {
