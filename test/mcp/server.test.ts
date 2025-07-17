@@ -179,10 +179,10 @@ describe('MCP Server Integration', () => {
 
       const assignResponse = JSON.parse(assignResult.content[0].text);
       expect(assignResponse.success).toBe(true);
-      expect(assignResponse.data.task.assignedTo).toBe('workflow-agent');
-      const assignedTaskId = assignResponse.data.task.id;
-      expect(assignResponse.data.task.assignedAt).toBeDefined();
-      expect(assignResponse.data.task.leaseExpiresAt).toBeDefined();
+      expect(assignResponse.data.assignedTo).toBe('workflow-agent');
+      const assignedTaskId = assignResponse.data.id;
+      expect(assignResponse.data.assignedAt).toBeDefined();
+      expect(assignResponse.data.leaseExpiresAt).toBeDefined();
 
       // 6. Complete task
       const completeResult = await toolHandlers.handleToolCall({
@@ -208,7 +208,7 @@ describe('MCP Server Integration', () => {
       }
       expect(completeResponse.success).toBe(true);
       expect(completeResponse.data.status).toBe('completed');
-      expect(completeResponse.data.result).toBe('Task completed successfully');
+      expect(completeResponse.data.result.output).toBe('Task completed successfully');
 
       // 7. Verify project stats
       const statsResult = await toolHandlers.handleToolCall({

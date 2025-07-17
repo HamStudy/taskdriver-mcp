@@ -5,13 +5,12 @@
  * Most traditional "agent management" is unnecessary - agents just get tasks from the queue.
  */
 
-import chalk from 'chalk';
-import { CommandParameter, defineCommand, TaskTypes } from '../types.js';
+import chalk from '../../utils/chalk.js';
+import { CommandParameter, CommandResult, defineCommand, TaskTypes } from '../types.js';
 import { Task } from '../../types/Task.js';
 import { AgentStatus } from '../../types/Agent.js';
 import { 
   readContentFromFileOrValue, 
-  findProjectByNameOrId,
   parseJsonSafely 
 } from '../utils.js';
 
@@ -165,8 +164,7 @@ export const getNextTask = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -199,7 +197,7 @@ export const getNextTask = defineCommand({
       data: taskWithInstructions,
       agentName: result.agentName,
       message: 'Task assigned successfully'
-    };
+    } satisfies CommandResult<Task>;
   }
 });
 
@@ -233,8 +231,7 @@ export const listActiveAgents = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -247,7 +244,7 @@ export const listActiveAgents = defineCommand({
     return {
       success: true,
       data: agents
-    };
+    } satisfies CommandResult<AgentStatus[]>;
   }
 });
 
@@ -307,8 +304,7 @@ export const completeTask = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -411,8 +407,7 @@ export const failTask = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -541,8 +536,7 @@ export const peekNextTask = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -550,9 +544,8 @@ export const peekNextTask = defineCommand({
       };
     }
 
-    // Check if any tasks are available (queued status)
-    const tasks = await context.task.listTasks(project.id, { status: 'queued' });
-    const availableCount = tasks.length;
+    // Check if any tasks are available (queued or with expired leases)
+    const availableCount = await context.storage.countAvailableTasks(project.id);
 
     if (availableCount === 0) {
       return {

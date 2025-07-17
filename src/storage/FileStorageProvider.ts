@@ -10,7 +10,6 @@ import {
   TaskUpdateInput, 
   TaskFilters,
   TaskResult,
-  TaskInput,
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
@@ -30,6 +29,8 @@ import {
   listFiles,
   removeFileSafe 
 } from '../utils/fileUtils.js';
+import { uuidSchema } from '../utils/validation.js';
+import { logger } from '../utils/logger.js';
 
 interface ProjectData {
   project: Project;
@@ -39,12 +40,67 @@ interface ProjectData {
 }
 
 /**
+ * Check if a string is a valid UUID
+ */
+function isValidUUID(str: string): boolean {
+  try {
+    const { error } = uuidSchema.validate(str);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Find project data by UUID (direct file lookup)
+ */
+async function findProjectByUUID(dataDir: string, projectId: string): Promise<{ projectId: string; data: ProjectData } | null> {
+  const projectFilePath = path.join(dataDir, 'projects', `${projectId}.json`);
+  try {
+    const content = await readFileSafe(projectFilePath);
+    if (content) {
+      const data: ProjectData = JSON.parse(content);
+      return { projectId, data };
+    }
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Find project data by name (grep-based search)
+ */
+async function findProjectByName(dataDir: string, projectName: string): Promise<{ projectId: string; data: ProjectData } | null> {
+  const projectsDir = path.join(dataDir, 'projects');
+  const projectFiles = await listFiles(projectsDir, '.json');
+
+  for (const filePath of projectFiles) {
+    try {
+      const content = await readFileSafe(filePath);
+      if (content && new RegExp(`"name"\\s*:\\s*"${projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g').test(content)) {
+        const data: ProjectData = JSON.parse(content);
+        if (data.project.name === projectName) {
+          return { projectId: data.project.id, data };
+        }
+      }
+    } catch (error) {
+      // Skip files that can't be read
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/**
  * File-based storage provider using JSON files with proper file locking
  * Suitable for single-machine deployments and development
  */
 export class FileStorageProvider extends BaseStorageProvider {
   private dataDir: string;
   private lockTimeout: number;
+  private memoryLocks: Map<string, Promise<any>> = new Map();
 
   constructor(dataDir: string = './data', lockTimeout: number = 30000) {
     super();
@@ -68,9 +124,6 @@ export class FileStorageProvider extends BaseStorageProvider {
     return path.join(this.dataDir, 'projects', `${projectId}.json`);
   }
 
-  private getLockFilePath(projectId: string): string {
-    return path.join(this.dataDir, 'locks', `${projectId}.lock`);
-  }
 
   private async withProjectLock<T>(
     projectId: string, 
@@ -87,36 +140,98 @@ export class FileStorageProvider extends BaseStorageProvider {
       throw new Error(`Project ${projectId} not found`);
     }
     
-    // Acquire exclusive lock on the project file itself
-    const release = await lockfile.lock(projectFilePath, {
-      retries: {
-        retries: 10,
-        minTimeout: 10,
-        maxTimeout: 100,
-        factor: 1.2
-      },
-      stale: this.lockTimeout,
+    // FIRST: Acquire in-memory lock to prevent concurrent operations on the same project
+    const memoryLockKey = `project:${projectId}`;
+    while (this.memoryLocks.has(memoryLockKey)) {
+      logger.trace('Waiting for in-memory lock', {
+        operation: 'withProjectLock',
+        projectId,
+        memoryLockKey
+      });
+      await this.memoryLocks.get(memoryLockKey);
+    }
+    
+    // Create a new promise for this lock
+    let resolveMemoryLock: () => void;
+    const memoryLockPromise = new Promise<void>((resolve) => {
+      resolveMemoryLock = resolve;
     });
-
+    this.memoryLocks.set(memoryLockKey, memoryLockPromise);
+    logger.trace('Acquired in-memory lock', {
+      operation: 'withProjectLock',
+      projectId,
+      memoryLockKey
+    });
+    
     try {
-      // Read current data
-      const currentData = await this.readProjectData(projectId);
-      
-      // Perform operation
-      const { data: newData, result } = await operation(currentData);
-      
-      // Write back atomically
-      await this.writeProjectData(projectId, newData);
-      
-      return result;
+      // SECOND: Acquire file lock
+      logger.trace('Acquiring file lock', {
+        operation: 'withProjectLock',
+        projectId
+      });
+      const lockStart = Date.now();
+      const release = await lockfile.lock(projectFilePath, {
+        retries: {
+          retries: 50,  // Increased retries for high concurrency
+          minTimeout: 5,  // Faster retry start
+          maxTimeout: 200,  // Higher max timeout
+          factor: 1.1  // More gradual backoff
+        },
+        stale: this.lockTimeout,
+      });
+      const lockEnd = Date.now();
+      logger.trace('File lock acquired', {
+        operation: 'withProjectLock',
+        projectId,
+        duration: lockEnd - lockStart
+      });
+
+      try {
+        // Read current data
+        const currentData = await this.readProjectData(projectId);
+        
+        // Perform operation
+        const { data: newData, result } = await operation(currentData);
+        
+        // Write back atomically
+        await this.writeProjectData(projectId, newData);
+        
+        return result;
+      } finally {
+        logger.trace('Releasing file lock', {
+          operation: 'withProjectLock',
+          projectId
+        });
+        const releaseStart = Date.now();
+        await release();
+        const releaseEnd = Date.now();
+        logger.trace('File lock released', {
+          operation: 'withProjectLock',
+          projectId,
+          duration: releaseEnd - releaseStart
+        });
+      }
     } finally {
-      await release();
+      // Release in-memory lock
+      this.memoryLocks.delete(memoryLockKey);
+      resolveMemoryLock!();
+      logger.trace('In-memory lock released', {
+        operation: 'withProjectLock',
+        projectId,
+        memoryLockKey
+      });
     }
   }
 
   private async readProjectData(projectId: string): Promise<ProjectData> {
     const filePath = this.getProjectFilePath(projectId);
+    logger.trace('Reading project data', {
+      operation: 'readProjectData',
+      projectId
+    });
+    const readStart = Date.now();
     const content = await readFileSafe(filePath);
+    const readEnd = Date.now();
     
     if (!content) {
       throw new Error(`Project ${projectId} not found`);
@@ -125,7 +240,14 @@ export class FileStorageProvider extends BaseStorageProvider {
     try {
       const data = JSON.parse(content);
       // Convert date strings back to Date objects
-      return this.deserializeDates(data);
+      const result: ProjectData = this.deserializeDates(data);
+      logger.trace('Project data read successfully', {
+        operation: 'readProjectData',
+        projectId,
+        duration: readEnd - readStart,
+        queuedTasks: result.tasks.filter(t => t.status === 'queued').length
+      });
+      return result;
     } catch (error) {
       throw new Error(`Failed to parse project data for ${projectId}: ${error}`);
     }
@@ -135,45 +257,122 @@ export class FileStorageProvider extends BaseStorageProvider {
     const filePath = this.getProjectFilePath(projectId);
     const serializedData = this.serializeDates(data);
     const content = JSON.stringify(serializedData, null, 2);
+    logger.trace('Writing project data', {
+      operation: 'writeProjectData',
+      projectId,
+      queuedTasks: data.tasks.filter(t => t.status === 'queued').length
+    });
+    const writeStart = Date.now();
     await writeFileAtomic(filePath, content);
+    const writeEnd = Date.now();
+    logger.trace('Project data written successfully', {
+      operation: 'writeProjectData',
+      projectId,
+      duration: writeEnd - writeStart
+    });
+    
+    // FORCE FILE SYSTEM SYNC: Add small delay and force sync to ensure data is persisted
+    await new Promise(resolve => setTimeout(resolve, 1)); // 1ms delay
+    
+    // VERIFICATION: Immediately read back the data to verify write was successful
+    const verifyStart = Date.now();
+    const verifiedContent = await readFileSafe(filePath);
+    const verifyEnd = Date.now();
+    if (verifiedContent) {
+      const verifiedData = JSON.parse(verifiedContent) as typeof data;
+      logger.trace('Data verification completed', {
+        operation: 'writeProjectData',
+        projectId,
+        duration: verifyEnd - verifyStart,
+        verifiedQueuedTasks: verifiedData.tasks.filter(t => t.status === 'queued').length
+      });
+      
+      // DOUBLE CHECK: Compare with what we expected to write
+      const expectedQueuedTasks = data.tasks.filter(t => t.status === 'queued').map(t => `${t.id}:${t.status}`).join(', ');
+      const actualQueuedTasks = verifiedData.tasks.filter(t => t.status === 'queued').map(t => `${t.id}:${t.status}`).join(', ');
+      if (expectedQueuedTasks !== actualQueuedTasks) {
+        logger.trace('Write verification mismatch detected', {
+          operation: 'writeProjectData',
+          projectId,
+          expected: expectedQueuedTasks,
+          actual: actualQueuedTasks
+        });
+        throw new Error(`Data write verification failed: expected ${expectedQueuedTasks}, got ${actualQueuedTasks}`);
+      }
+    } else {
+      logger.trace('Failed to read back written data for verification', {
+        operation: 'writeProjectData',
+        projectId
+      });
+      throw new Error(`Failed to read back written data for verification`);
+    }
   }
 
-  private serializeDates(obj: any): any {
+  /**
+   * Recursively serializes Date objects to ISO strings for JSON storage.
+   * 
+   * @param obj - The object that may contain Date objects
+   * @returns The same object structure with Date objects converted to ISO strings
+   */
+  private serializeDates<T>(obj: T): T {
     if (obj instanceof Date) {
-      return obj.toISOString();
+      return obj.toISOString() as unknown as T;
     }
     if (Array.isArray(obj)) {
-      return obj.map(item => this.serializeDates(item));
+      return obj.map(item => this.serializeDates(item)) as unknown as T;
     }
-    if (obj && typeof obj === 'object') {
-      const result: any = {};
+    if (obj && typeof obj === 'object' && obj !== null) {
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         result[key] = this.serializeDates(value);
       }
-      return result;
+      return result as T;
     }
     return obj;
   }
 
-  private deserializeDates(obj: any): any {
+  /**
+   * Recursively deserializes ISO date strings back to Date objects in JSON data.
+   * 
+   * When data is stored as JSON, Date objects are serialized as ISO strings.
+   * This function walks through the entire object tree and converts any string
+   * that matches the ISO date format back to a Date object.
+   * 
+   * Special handling:
+   * - Preserves metadata objects as-is (keeps dates as strings for external storage)
+   * - Handles nested objects and arrays recursively
+   * - Only converts strings that match exact ISO format: YYYY-MM-DDTHH:mm:ss.sssZ
+   * 
+   * @param obj - The parsed JSON object that may contain ISO date strings
+   * @returns The same object structure with ISO date strings converted to Date objects
+   */
+  private deserializeDates<T>(obj: T): T {
+    // Convert ISO date strings to Date objects
     if (typeof obj === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/.test(obj)) {
-      return new Date(obj);
+      return new Date(obj) as unknown as T;
     }
+    
+    // Handle arrays recursively
     if (Array.isArray(obj)) {
-      return obj.map(item => this.deserializeDates(item));
+      return obj.map(item => this.deserializeDates(item)) as unknown as T;
     }
-    if (obj && typeof obj === 'object') {
-      const result: any = {};
+    
+    // Handle objects recursively
+    if (obj && typeof obj === 'object' && obj !== null) {
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         // Don't deserialize dates in metadata objects - they should stay as strings
+        // for external storage compatibility and debugging purposes
         if (key === 'metadata' && typeof value === 'object' && value !== null) {
           result[key] = value;
         } else {
           result[key] = this.deserializeDates(value);
         }
       }
-      return result;
+      return result as T;
     }
+    
+    // Return primitive values unchanged
     return obj;
   }
 
@@ -212,7 +411,6 @@ export class FileStorageProvider extends BaseStorageProvider {
       config: {
         defaultMaxRetries: input.config?.defaultMaxRetries ?? 3,
         defaultLeaseDurationMinutes: input.config?.defaultLeaseDurationMinutes ?? 1.5,
-        reaperIntervalMinutes: input.config?.reaperIntervalMinutes ?? 1,
       },
       stats: {
         totalTasks: 0,
@@ -233,26 +431,36 @@ export class FileStorageProvider extends BaseStorageProvider {
     return project;
   }
 
-  async getProject(projectId: string): Promise<Project | null> {
+  async getProject(projectNameOrId: string): Promise<Project | null> {
     this.ensureInitialized();
     
-    try {
-      const data = await this.readProjectData(projectId);
+    // Find project data using appropriate method
+    const result = isValidUUID(projectNameOrId) 
+      ? await findProjectByUUID(this.dataDir, projectNameOrId)
+      : await findProjectByName(this.dataDir, projectNameOrId);
+    
+    if (!result) {
+      return null;
+    }
+    
+    // For consistent project stats, use the lock to read/update if needed
+    const { projectId } = result;
+    return this.withProjectLock(projectId, async (data) => {
       const updatedProject = this.updateProjectStats(data.project, data.tasks);
       
-      // Update the project with current stats
-      if (updatedProject.stats !== data.project.stats) {
-        data.project = updatedProject;
-        await this.writeProjectData(projectId, data);
-      }
+      // Update the project with current stats if needed
+      const needsUpdate = JSON.stringify(updatedProject.stats) !== JSON.stringify(data.project.stats);
       
-      return updatedProject;
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
-        return null;
+      if (needsUpdate) {
+        const newData = {
+          ...data,
+          project: updatedProject
+        };
+        return { data: newData, result: updatedProject };
+      } else {
+        return { data, result: updatedProject };
       }
-      throw error;
-    }
+    });
   }
 
   async updateProject(projectId: string, input: ProjectUpdateInput): Promise<Project> {
@@ -271,6 +479,10 @@ export class FileStorageProvider extends BaseStorageProvider {
         result: finalProject,
       };
     });
+  }
+
+  async getProjectByNameOrId(nameOrId: string): Promise<Project | null> {
+    return this.getProject(nameOrId);
   }
 
   async listProjects(includeClosed: boolean = false): Promise<Project[]> {
@@ -292,7 +504,11 @@ export class FileStorageProvider extends BaseStorageProvider {
         }
       } catch (error) {
         // Skip corrupted files
-        console.warn(`Failed to read project file ${filePath}:`, error);
+        logger.trace('Failed to read project file', {
+          operation: 'listProjects',
+          filePath,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     }
     
@@ -356,6 +572,19 @@ export class FileStorageProvider extends BaseStorageProvider {
     return null;
   }
 
+  async getTaskTypeByNameOrId(projectNameOrId: string, nameOrId: string): Promise<TaskType | null> {
+    this.ensureInitialized();
+    
+    // First resolve the project, then search by name or id within the project
+    const project = await this.getProjectByNameOrId(projectNameOrId);
+    if (!project) {
+      return null;
+    }
+    
+    const taskTypes = await this.listTaskTypes(project.id);
+    return taskTypes.find(tt => tt.id === nameOrId || tt.name === nameOrId) || null;
+  }
+
   async updateTaskType(typeId: string, input: TaskTypeUpdateInput): Promise<TaskType> {
     this.ensureInitialized();
     
@@ -398,7 +627,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file', {
+            operation: 'updateTaskType',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -411,8 +646,8 @@ export class FileStorageProvider extends BaseStorageProvider {
     try {
       const data = await this.readProjectData(projectId);
       return data.taskTypes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
         return [];
       }
       throw error;
@@ -442,7 +677,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file', {
+            operation: 'deleteTaskType',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -533,6 +774,40 @@ export class FileStorageProvider extends BaseStorageProvider {
       // Generate agent name if not provided
       const finalAgentName = agentName || `agent-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       
+      // First, reclaim any expired leases
+      const expiredTasks = data.tasks.filter(t => 
+        t.status === 'running' && 
+        t.leaseExpiresAt && 
+        t.leaseExpiresAt <= now
+      );
+      
+      let reclaimedCount = 0;
+      const reclaimedAgents = new Set<string>();
+      
+      for (const expiredTask of expiredTasks) {
+        // Track agent before clearing
+        if (expiredTask.assignedTo) {
+          reclaimedAgents.add(expiredTask.assignedTo);
+        }
+        
+        // Reset task to queued state
+        expiredTask.status = 'queued';
+        expiredTask.assignedTo = undefined;
+        expiredTask.assignedAt = undefined;
+        expiredTask.leaseExpiresAt = undefined;
+        
+        reclaimedCount++;
+      }
+      
+      // Log reclaimed tasks
+      if (reclaimedCount > 0) {
+        logger.info(`Reclaimed ${reclaimedCount} expired tasks for project ${projectId}`, {
+          projectId,
+          reclaimedTasks: reclaimedCount,
+          cleanedAgents: reclaimedAgents.size
+        });
+      }
+      
       // If agent name was provided, check if they have an existing running task
       if (agentName) {
         const existingTask = data.tasks.find(t => 
@@ -554,8 +829,24 @@ export class FileStorageProvider extends BaseStorageProvider {
         }
       }
       
-      // Find first queued task
-      const taskIndex = data.tasks.findIndex(t => t.status === 'queued');
+      // Find first queued task that hasn't exceeded retry limits
+      const queuedTasks = data.tasks.filter(t => t.status === 'queued');
+      logger.trace('Checking available queued tasks', {
+        operation: 'getNextTask',
+        projectId,
+        agentName: finalAgentName,
+        queuedTasksCount: queuedTasks.length,
+        queuedTasks: queuedTasks.map(t => ({
+          id: t.id,
+          retryCount: t.retryCount,
+          maxRetries: t.maxRetries,
+          canAssign: t.retryCount <= t.maxRetries
+        }))
+      });
+      
+      const taskIndex = data.tasks.findIndex(t => 
+        t.status === 'queued' && t.retryCount <= t.maxRetries
+      );
       
       if (taskIndex === -1) {
         // No tasks available
@@ -570,6 +861,35 @@ export class FileStorageProvider extends BaseStorageProvider {
 
       const task = data.tasks[taskIndex];
       if (!task) {
+        return {
+          data,
+          result: {
+            task: null,
+            agentName: finalAgentName
+          }
+        };
+      }
+      
+      logger.trace('Agent attempting task assignment', {
+        operation: 'getNextTask',
+        projectId,
+        agentName: finalAgentName,
+        taskId: task.id,
+        taskIndex,
+        taskStatus: task.status,
+        currentQueuedTasks: data.tasks.filter(t => t.status === 'queued').length
+      });
+      
+      // Double-check the task is still queued (race condition prevention)
+      if (task.status !== 'queued') {
+        logger.trace('Task status changed during assignment', {
+          operation: 'getNextTask',
+          projectId,
+          agentName: finalAgentName,
+          taskId: task.id,
+          newStatus: task.status,
+          warning: 'race_condition_prevented'
+        });
         return {
           data,
           result: {
@@ -606,6 +926,15 @@ export class FileStorageProvider extends BaseStorageProvider {
 
       data.tasks[taskIndex] = updatedTask;
       
+      logger.trace('Task assignment successful', {
+        operation: 'getNextTask',
+        projectId,
+        agentName: finalAgentName,
+        taskId: updatedTask.id,
+        taskStatus: updatedTask.status,
+        remainingQueuedTasks: data.tasks.filter(t => t.status === 'queued').length
+      });
+      
       return {
         data,
         result: {
@@ -635,7 +964,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file', {
+            operation: 'getTask',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -689,7 +1024,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file during updateTask', {
+            operation: 'updateTask',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -728,16 +1069,18 @@ export class FileStorageProvider extends BaseStorageProvider {
       
       // Return all tasks if no pagination specified
       return tasks;
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
         return [];
       }
       throw error;
     }
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    // Implementation needed
+  async deleteTask(_taskId: string): Promise<void> {
+    logger.trace('Task deletion not implemented for file storage', {
+      operation: 'deleteTask'
+    });
     throw new Error('Method not implemented');
   }
 
@@ -751,7 +1094,6 @@ export class FileStorageProvider extends BaseStorageProvider {
       const now = new Date();
       
       // Find all tasks currently assigned to agents with active leases
-      const activeAgents: AgentStatus[] = [];
       const agentMap = new Map<string, AgentStatus>();
       
       for (const task of data.tasks) {
@@ -772,8 +1114,8 @@ export class FileStorageProvider extends BaseStorageProvider {
       return Array.from(agentMap.values()).sort((a, b) => 
         (a.assignedAt?.getTime() || 0) - (b.assignedAt?.getTime() || 0)
       );
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
         return [];
       }
       throw error;
@@ -807,8 +1149,8 @@ export class FileStorageProvider extends BaseStorageProvider {
         assignedAt: activeTask.assignedAt || new Date(),
         leaseExpiresAt: activeTask.leaseExpiresAt
       };
-    } catch (error: any) {
-      if (error.message.includes('not found')) {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
         return null;
       }
       throw error;
@@ -834,7 +1176,13 @@ export class FileStorageProvider extends BaseStorageProvider {
             const projectId = data.project.id;
             
             await this.withProjectLock(projectId, async (lockedData) => {
-              const task = lockedData.tasks[taskIndex];
+              // Re-find the task index within the lock to avoid race conditions
+              const currentTaskIndex = lockedData.tasks.findIndex(t => t.id === taskId);
+              if (currentTaskIndex === -1) {
+                throw new Error(`Task ${taskId} not found in locked project data`);
+              }
+              
+              const task = lockedData.tasks[currentTaskIndex];
               if (!task) {
                 throw new Error(`Task ${taskId} not found in project data`);
               }
@@ -868,7 +1216,7 @@ export class FileStorageProvider extends BaseStorageProvider {
                 leaseExpiresAt: undefined,
               };
               
-              lockedData.tasks[taskIndex] = updatedTask;
+              lockedData.tasks[currentTaskIndex] = updatedTask;
               
               return { data: lockedData, result: undefined };
             });
@@ -877,7 +1225,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file', {
+            operation: 'completeTask',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -901,7 +1255,13 @@ export class FileStorageProvider extends BaseStorageProvider {
             const projectId = data.project.id;
             
             await this.withProjectLock(projectId, async (lockedData) => {
-              const task = lockedData.tasks[taskIndex];
+              // Re-find the task index within the lock to avoid race conditions
+              const currentTaskIndex = lockedData.tasks.findIndex(t => t.id === taskId);
+              if (currentTaskIndex === -1) {
+                throw new Error(`Task ${taskId} not found in locked project data`);
+              }
+              
+              const task = lockedData.tasks[currentTaskIndex];
               if (!task) {
                 throw new Error(`Task ${taskId} not found in project data`);
               }
@@ -925,9 +1285,19 @@ export class FileStorageProvider extends BaseStorageProvider {
                 currentAttempt.result = result;
               }
               
-              // Determine if we should retry (check if we haven't exceeded max retries)
-              const shouldRetry = canRetry && task.retryCount < task.maxRetries;
+              // Determine if we should retry (check if new retry count won't exceed max retries)
               const newRetryCount = task.retryCount + 1;
+              const shouldRetry = canRetry && newRetryCount <= task.maxRetries;
+              
+              logger.trace('Task retry logic evaluation', {
+                operation: 'failTask',
+                taskId,
+                retryCount: task.retryCount,
+                maxRetries: task.maxRetries,
+                canRetry,
+                shouldRetry,
+                newRetryCount
+              });
               
               const updatedTask: Task = {
                 ...task,
@@ -940,7 +1310,7 @@ export class FileStorageProvider extends BaseStorageProvider {
                 assignedAt: undefined,
               };
               
-              lockedData.tasks[taskIndex] = updatedTask;
+              lockedData.tasks[currentTaskIndex] = updatedTask;
               
               return { data: lockedData, result: undefined };
             });
@@ -949,7 +1319,13 @@ export class FileStorageProvider extends BaseStorageProvider {
           }
         }
       } catch (error) {
-        // Skip corrupted files
+        // Skip corrupted files - log for debugging
+        if (error instanceof Error) {
+          logger.trace('Skipped corrupted project file', {
+            operation: 'failTask',
+            error: error.message
+          });
+        }
       }
     }
     
@@ -961,7 +1337,7 @@ export class FileStorageProvider extends BaseStorageProvider {
     throw new Error('Method not implemented');
   }
 
-  async requeueTask(taskId: string): Promise<void> {
+  async requeueTask(_taskId: string): Promise<void> {
     // Implementation needed
     throw new Error('Method not implemented');
   }
@@ -985,6 +1361,17 @@ export class FileStorageProvider extends BaseStorageProvider {
     });
   }
 
+  async countAvailableTasks(projectId: string): Promise<number> {
+    this.ensureInitialized();
+    
+    const tasks = await this.listTasks(projectId);
+    const now = new Date();
+    
+    return tasks.filter(task => 
+      task.status === 'queued' || 
+      (task.status === 'running' && task.leaseExpiresAt && task.leaseExpiresAt < now)
+    ).length;
+  }
 
   async findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null> {
     this.ensureInitialized();
@@ -1001,7 +1388,7 @@ export class FileStorageProvider extends BaseStorageProvider {
     return null;
   }
 
-  async getTaskHistory(taskId: string): Promise<Task[]> {
+  async getTaskHistory(_taskId: string): Promise<Task[]> {
     // Implementation needed
     throw new Error('Method not implemented');
   }

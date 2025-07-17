@@ -8,6 +8,7 @@ import path from 'path';
 import { listTasks } from '../../src/commands/definitions/task.js';
 import { formatCommandResult } from '../../src/commands/formatters.js';
 import { createStorageProvider } from '../../src/storage/index.js';
+import { createServiceContext } from '../../src/commands/context.js';
 import { ProjectService } from '../../src/services/ProjectService.js';
 import { TaskService } from '../../src/services/TaskService.js';
 import { TaskTypeService } from '../../src/services/TaskTypeService.js';
@@ -42,17 +43,13 @@ describe('Pagination Logic Tests', () => {
 
     await storage.initialize();
 
-    // Create services
-    projectService = new ProjectService(storage);
-    taskTypeService = new TaskTypeService(storage, projectService);
-    taskService = new TaskService(storage, projectService, taskTypeService);
-
-    // Create context for commands
-    context = {
-      project: projectService,
-      task: taskService,
-      taskType: taskTypeService
-    };
+    // Create context and services using the standard context factory
+    context = createServiceContext(storage);
+    
+    // Extract services for convenience
+    projectService = context.project;
+    taskService = context.task;
+    taskTypeService = context.taskType;
 
     // Create a test project
     const project = await projectService.createProject({
@@ -94,11 +91,11 @@ describe('Pagination Logic Tests', () => {
       projectId: 'test-pagination-project',
       limit: 5,
       offset: 0
-    });
+    } as any);
 
     expect(result1.success).toBe(true);
-    expect(result1.data.tasks).toHaveLength(5);
-    expect(result1.data.pagination).toEqual({
+    expect(result1.data).toHaveLength(5);
+    expect(result1.pagination).toEqual({
       total: 10,
       offset: 0,
       limit: 5,
@@ -112,11 +109,11 @@ describe('Pagination Logic Tests', () => {
       projectId: 'test-pagination-project',
       limit: 5,
       offset: 5
-    });
+    } as any);
 
     expect(result2.success).toBe(true);
-    expect(result2.data.tasks).toHaveLength(5);
-    expect(result2.data.pagination).toEqual({
+    expect(result2.data).toHaveLength(5);
+    expect(result2.pagination).toEqual({
       total: 10,
       offset: 5,
       limit: 5,
@@ -142,11 +139,11 @@ describe('Pagination Logic Tests', () => {
       projectId: 'test-pagination-project',
       limit: 5,
       offset: 0
-    });
+    } as any);
 
     expect(result1.success).toBe(true);
-    expect(result1.data.tasks).toHaveLength(5);
-    expect(result1.data.pagination).toEqual({
+    expect(result1.data).toHaveLength(5);
+    expect(result1.pagination).toEqual({
       total: 7,
       offset: 0,
       limit: 5,
@@ -160,11 +157,11 @@ describe('Pagination Logic Tests', () => {
       projectId: 'test-pagination-project',
       limit: 5,
       offset: 5
-    });
+    } as any);
 
     expect(result2.success).toBe(true);
-    expect(result2.data.tasks).toHaveLength(2);
-    expect(result2.data.pagination).toEqual({
+    expect(result2.data).toHaveLength(2);
+    expect(result2.pagination).toEqual({
       total: 7,
       offset: 5,
       limit: 5,
@@ -184,8 +181,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.data.tasks).toHaveLength(0);
-    expect(result.data.pagination).toEqual({
+    expect(result.data).toHaveLength(0);
+    expect(result.pagination).toEqual({
       total: 0,
       offset: 0,
       limit: 5,
@@ -213,8 +210,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.data.tasks).toHaveLength(3);
-    expect(result.data.pagination).toEqual({
+    expect(result.data).toHaveLength(3);
+    expect(result.pagination).toEqual({
       total: 3,
       offset: 0,
       limit: 5,
@@ -243,8 +240,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.data.tasks).toHaveLength(500); // Should return exactly 500 tasks
-    expect(result.data.pagination).toEqual({
+    expect(result.data).toHaveLength(500); // Should return exactly 500 tasks
+    expect(result.pagination).toEqual({
       total: 600,
       offset: 0,
       limit: 500,
@@ -273,8 +270,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result1.success).toBe(true);
-    expect(result1.data.tasks).toHaveLength(50);
-    expect(result1.data.pagination).toEqual({
+    expect(result1.data).toHaveLength(50);
+    expect(result1.pagination).toEqual({
       total: 250,
       offset: 0,
       limit: 50,
@@ -291,8 +288,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result2.success).toBe(true);
-    expect(result2.data.tasks).toHaveLength(50);
-    expect(result2.data.pagination).toEqual({
+    expect(result2.data).toHaveLength(50);
+    expect(result2.pagination).toEqual({
       total: 250,
       offset: 100,
       limit: 50,
@@ -309,8 +306,8 @@ describe('Pagination Logic Tests', () => {
     });
 
     expect(result3.success).toBe(true);
-    expect(result3.data.tasks).toHaveLength(50);
-    expect(result3.data.pagination).toEqual({
+    expect(result3.data).toHaveLength(50);
+    expect(result3.pagination).toEqual({
       total: 250,
       offset: 200,
       limit: 50,
@@ -339,7 +336,7 @@ describe('Pagination Logic Tests', () => {
     });
 
     const formatted = formatCommandResult(result, 'list-tasks', 'human', {});
-    expect(formatted.text).toContain('Page (1) of (3)');
+    expect(formatted.text).toContain('Page 1 of 3');
     
     // Test second page (offset 10, limit 10) - should be page 2 of 3
     const result2 = await listTasks.handler(context, {
@@ -349,6 +346,6 @@ describe('Pagination Logic Tests', () => {
     });
 
     const formatted2 = formatCommandResult(result2, 'list-tasks', 'human', {});
-    expect(formatted2.text).toContain('Page (2) of (3)');
+    expect(formatted2.text).toContain('Page 2 of 3');
   });
 });

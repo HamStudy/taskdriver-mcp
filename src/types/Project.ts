@@ -9,7 +9,6 @@ export interface Project {
   config: {
     defaultMaxRetries: number;  // Default retry count for new task types
     defaultLeaseDurationMinutes: number;  // Default lease duration for new task types
-    reaperIntervalMinutes: number;  // How often to check for expired leases
   };
   stats: {
     totalTasks: number;

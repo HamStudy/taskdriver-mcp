@@ -1,5 +1,6 @@
 import { StorageProvider } from '../storage/index.js';
 import { Task, TaskResult } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Service for managing task leases and expired task recovery
@@ -29,6 +30,13 @@ export class LeaseService {
       const expiredTasks = runningTasks.filter(task => 
         task.leaseExpiresAt && task.leaseExpiresAt < now
       );
+      
+      // Log cleanup operation for debugging
+      logger.debug(`LeaseService cleanup: ${runningTasks.length} running tasks, ${expiredTasks.length} expired tasks`, {
+        projectId,
+        runningTasksCount: runningTasks.length,
+        expiredTasksCount: expiredTasks.length
+      });
 
       // Reclaim expired tasks (no agent state to clean in lease-based model)
       for (const task of expiredTasks) {
@@ -43,16 +51,26 @@ export class LeaseService {
             cleanedAgents++;
           }
         } catch (error) {
-          console.error(`❌ Failed to reclaim expired task ${task.id}:`, error);
+          logger.error(`Failed to reclaim expired task ${task.id}`, {
+            taskId: task.id,
+            error
+          });
         }
       }
 
       if (reclaimedTasks > 0) {
-        console.log(`🔄 Reclaimed ${reclaimedTasks} expired tasks for project ${projectId}`);
+        logger.info(`Reclaimed ${reclaimedTasks} expired tasks for project ${projectId}`, {
+          projectId,
+          reclaimedTasks,
+          cleanedAgents
+        });
       }
 
     } catch (error) {
-      console.error(`❌ Failed to cleanup expired leases for project ${projectId}:`, error);
+      logger.error(`Failed to cleanup expired leases for project ${projectId}`, {
+        projectId,
+        error
+      });
     }
 
     return { reclaimedTasks, cleanedAgents };
@@ -62,7 +80,11 @@ export class LeaseService {
    * Reclaim a specific expired task
    */
   private async reclaimExpiredTask(task: Task): Promise<void> {
-    console.log(`⏰ Reclaiming expired task ${task.id} from agent ${task.assignedTo}`);
+    logger.debug(`Reclaiming expired task ${task.id} from agent ${task.assignedTo}`, {
+      taskId: task.id,
+      assignedTo: task.assignedTo,
+      leaseExpiresAt: task.leaseExpiresAt
+    });
 
     // Create a task result indicating timeout
     const timeoutResult: TaskResult = {
@@ -81,7 +103,10 @@ export class LeaseService {
     // Note: In lease-based model, we need to provide agentName even for timeouts
     await this.storage.failTask(task.id, task.assignedTo || 'unknown', timeoutResult, true);
 
-    console.log(`✅ Task ${task.id} reclaimed and requeued for retry`);
+    logger.debug(`Task ${task.id} reclaimed and requeued for retry`, {
+      taskId: task.id,
+      assignedTo: task.assignedTo
+    });
   }
 
   /**
@@ -104,7 +129,11 @@ export class LeaseService {
       leaseExpiresAt: newExpiry
     });
 
-    console.log(`⏱️ Extended lease for task ${taskId} by ${extensionMinutes} minutes until ${newExpiry.toISOString()}`);
+    logger.debug(`Extended lease for task ${taskId} by ${extensionMinutes} minutes until ${newExpiry.toISOString()}`, {
+      taskId,
+      extensionMinutes,
+      newExpiry: newExpiry.toISOString()
+    });
   }
 
   /**

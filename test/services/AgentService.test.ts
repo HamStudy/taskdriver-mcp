@@ -458,7 +458,7 @@ describe('AgentService (Lease-based)', () => {
       const originalExpiry = taskBefore!.leaseExpiresAt!;
 
       // Extend lease by 30 minutes
-      await agentService.extendTaskLease(taskId, agentName, 30);
+      await agentService.extendTaskLease(agentName, projectId, taskId, 30);
 
       // Check that lease was extended
       const taskAfter = await taskService.getTask(taskId);
@@ -469,12 +469,12 @@ describe('AgentService (Lease-based)', () => {
     });
 
     it('should throw error for task not assigned to agent', async () => {
-      await expect(agentService.extendTaskLease(taskId, 'other-agent', 30))
+      await expect(agentService.extendTaskLease('other-agent', projectId, taskId, 30))
         .rejects.toThrow(`Task ${taskId} is not assigned to agent other-agent`);
     });
 
     it('should throw error for non-existent task', async () => {
-      await expect(agentService.extendTaskLease('non-existent-task', agentName, 30))
+      await expect(agentService.extendTaskLease(agentName, projectId, 'non-existent-task', 30))
         .rejects.toThrow('Task non-existent-task not found');
     });
 
@@ -482,7 +482,7 @@ describe('AgentService (Lease-based)', () => {
       // Complete the task first
       await agentService.completeTask(agentName, projectId, taskId, { success: true });
 
-      await expect(agentService.extendTaskLease(taskId, agentName, 30))
+      await expect(agentService.extendTaskLease(agentName, projectId, taskId, 30))
         .rejects.toThrow(`Task ${taskId} is not assigned to agent ${agentName}`);
     });
 
@@ -491,7 +491,7 @@ describe('AgentService (Lease-based)', () => {
       const originalExpiry = taskBefore!.leaseExpiresAt!;
 
       // Extend lease by 60 minutes
-      await agentService.extendTaskLease(taskId, agentName, 60);
+      await agentService.extendTaskLease(agentName, projectId, taskId, 60);
 
       const taskAfter = await taskService.getTask(taskId);
       const newExpiry = taskAfter!.leaseExpiresAt!;

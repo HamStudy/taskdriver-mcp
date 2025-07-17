@@ -24,7 +24,6 @@ export const createMockProject = (overrides?: Partial<Project>): Project => {
     config: {
       defaultMaxRetries: 3,
       defaultLeaseDurationMinutes: 10,
-      reaperIntervalMinutes: 1,
     },
     stats: {
       totalTasks: 0,
@@ -44,7 +43,6 @@ export const createMockProjectInput = (overrides?: Partial<ProjectCreateInput>):
     config: {
       defaultMaxRetries: 3,
       defaultLeaseDurationMinutes: 10,
-      reaperIntervalMinutes: 1,
     },
     ...overrides,
   };

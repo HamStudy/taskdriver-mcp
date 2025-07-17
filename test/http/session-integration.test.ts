@@ -38,7 +38,7 @@ const createTestConfig = (port = 0): TaskDriverConfig => ({
     format: 'json'
   },
   security: {
-    sessionTimeout: 30000, // 30 seconds for faster tests
+    sessionTimeout: 5000, // 5 seconds for faster tests
     rateLimit: {
       windowMs: 60000,
       max: 1000
@@ -363,8 +363,8 @@ describe('Session Integration Tests', () => {
         .set('Authorization', `Bearer ${sessionToken}`)
         .expect(200);
 
-      // Wait for session to expire (30 seconds as configured)
-      await new Promise(resolve => setTimeout(resolve, 31000));
+      // Wait for session to expire (5 seconds as configured)
+      await new Promise(resolve => setTimeout(resolve, 6000));
 
       // Session should be expired on server 1
       await request(app1)
@@ -381,7 +381,7 @@ describe('Session Integration Tests', () => {
         .get('/api/auth/session')
         .set('Authorization', `Bearer ${sessionToken}`)
         .expect(401);
-    }, 35000); // Allow time for session expiration
+    }, 10000); // Allow time for session expiration
 
     test('should handle multiple agents with separate sessions', async () => {
       // Create second agent

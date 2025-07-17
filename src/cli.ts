@@ -6,7 +6,7 @@
 
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import chalk from 'chalk';
+import chalk from './utils/chalk.js';
 import { loadConfig } from './config/index.js';
 import { createStorageProvider } from './storage/index.js';
 import { createServiceContext } from './commands/context.js';
@@ -42,7 +42,7 @@ async function buildCli() {
     .strict() // Reject unrecognized commands and options
     .fail((msg, err) => {
       if (err) {
-        console.error(chalk.red('❌ Error:'), err.message);
+        console.error(chalk.red('❌ Error:'), err.message, err.stack);
       } else {
         console.error(chalk.red('❌ Error:'), msg);
         console.error('\nRun --help to see available commands and options');

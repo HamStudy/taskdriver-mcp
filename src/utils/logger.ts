@@ -1,4 +1,6 @@
 import { performance } from 'perf_hooks';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Structured Logger for TaskDriver
@@ -42,6 +44,7 @@ class Logger {
   private serviceName: string;
   private environment: string;
   private version: string;
+  private testLogFile?: string;
 
   constructor(
     serviceName: string = 'taskdriver',
@@ -53,6 +56,15 @@ class Logger {
     this.logLevel = logLevel;
     this.environment = environment;
     this.version = version;
+    
+    // Set up test log file if running tests
+    if (this.environment === 'test' && process.env.TEST_LOG_FILE !== 'false') {
+      const logDir = path.join(process.cwd(), 'test-logs');
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      this.testLogFile = path.join(logDir, `test-${Date.now()}-${process.pid}.log`);
+    }
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -106,10 +118,26 @@ class Logger {
   private writeLog(logEntry: LogEntry): void {
     const output = JSON.stringify(logEntry);
     
-    if (logEntry.level === 'error' || logEntry.level === 'warn') {
-      console.error(output);
+    // Write to test log file if running tests
+    if (this.testLogFile) {
+      try {
+        fs.appendFileSync(this.testLogFile, output + '\n');
+      } catch (error) {
+        // Fallback to console if file writing fails
+        console.error('Failed to write to test log file:', error);
+        if (logEntry.level === 'error' || logEntry.level === 'warn') {
+          console.error(output);
+        } else {
+          console.log(output);
+        }
+      }
     } else {
-      console.log(output);
+      // Normal console output for non-test environments
+      if (logEntry.level === 'error' || logEntry.level === 'warn') {
+        console.error(output);
+      } else {
+        console.log(output);
+      }
     }
   }
 
@@ -260,6 +288,13 @@ class Logger {
    */
   getLogLevel(): LogLevel {
     return this.logLevel;
+  }
+
+  /**
+   * Get test log file path (for testing environments)
+   */
+  getTestLogFile(): string | undefined {
+    return this.testLogFile;
   }
 }
 

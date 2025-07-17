@@ -46,16 +46,16 @@ echo "🧹 Cleaning up existing test data..."
 rm -rf test-*-data 2>/dev/null || true
 
 # Run SessionService tests
-run_test "SessionService Unit Tests" "bun test test/services/SessionService.test.ts"
+run_test "SessionService Unit Tests" "NODE_ENV=test bun test test/services/SessionService.test.ts"
 
 # Run HTTP entry point tests
-run_test "HTTP Entry Point Tests" "bun test test/http/http-entry.test.ts"
+run_test "HTTP Entry Point Tests" "NODE_ENV=test bun test test/http/http-entry.test.ts"
 
 # Run main HTTP server integration tests
-run_test "HTTP Server Integration Tests" "bun test test/http/server.test.ts --timeout 15000"
+run_test "HTTP Server Integration Tests" "NODE_ENV=test bun test test/http/server.test.ts --timeout 15000"
 
 # Run session integration tests (these take longer due to timeouts)
-run_test "Session Integration Tests" "bun test test/http/session-integration.test.ts --timeout 45000"
+run_test "Session Integration Tests" "NODE_ENV=test bun test test/http/session-integration.test.ts --timeout 15000"
 
 # Final cleanup
 echo ""

@@ -93,7 +93,7 @@ bun test test/http/http-entry.test.ts
 bun test test/http/server.test.ts
 
 # Session integration tests (long-running)
-bun test test/http/session-integration.test.ts --timeout 45000
+bun test test/http/session-integration.test.ts --timeout 15000
 ```
 
 ## Test Data

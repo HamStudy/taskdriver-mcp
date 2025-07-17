@@ -404,8 +404,8 @@ describe('Storage Provider Contract', () => {
 
         // Test concurrent lease extensions
         await Promise.all([
-          agentService.extendTaskLease(task.id, 'lease-agent', 15),
-          agentService.extendTaskLease(task.id, 'lease-agent', 20)
+          agentService.extendTaskLease('lease-agent', project.id, task.id, 15),
+          agentService.extendTaskLease('lease-agent', project.id, task.id, 20)
         ]);
 
         // Both extensions should succeed without throwing errors
@@ -456,7 +456,8 @@ describe('Storage Provider Contract', () => {
           'retry-agent-1',
           project.id,
           task.id,
-          { success: false, error: 'First attempt failed' }
+          { success: false, error: 'First attempt failed' },
+          true // canRetry
         );
         
         const failed1 = await taskService.getTask(task.id);
@@ -729,31 +730,24 @@ describe('Storage Provider Contract', () => {
           agentService.getNextTask(project.id, 'bulk-agent-4')
         ]);
 
-        // All should succeed, but only first three should get tasks
+        // All should succeed, but only 3 should get tasks (assignment order not deterministic)
         expect(bulkAssignments[0].status).toBe('fulfilled');
         expect(bulkAssignments[1].status).toBe('fulfilled');
         expect(bulkAssignments[2].status).toBe('fulfilled');
         expect(bulkAssignments[3].status).toBe('fulfilled');
         
-        if (bulkAssignments[0].status === 'fulfilled') {
-          expect(bulkAssignments[0].value.task).toBeTruthy();
-        }
-        if (bulkAssignments[1].status === 'fulfilled') {
-          expect(bulkAssignments[1].value.task).toBeTruthy();
-        }
-        if (bulkAssignments[2].status === 'fulfilled') {
-          expect(bulkAssignments[2].value.task).toBeTruthy();
-        }
-        if (bulkAssignments[3].status === 'fulfilled') {
-          expect(bulkAssignments[3].value.task).toBeNull(); // No more tasks
-        }
-        
-        // Count successful assignments
-        const assignedTasks = bulkAssignments
+        // Count how many got tasks vs null - should be exactly 3 with tasks, 1 with null
+        const assignmentsWithTasks = bulkAssignments
           .filter(result => result.status === 'fulfilled')
           .map(result => (result as any).value.task)
           .filter(task => task !== null);
-        expect(assignedTasks).toHaveLength(3);
+        const assignmentsWithoutTasks = bulkAssignments
+          .filter(result => result.status === 'fulfilled')
+          .map(result => (result as any).value.task)
+          .filter(task => task === null);
+        
+        expect(assignmentsWithTasks).toHaveLength(3);
+        expect(assignmentsWithoutTasks).toHaveLength(1);
 
         // Verify final states
         const finalTasks = await taskService.listTasks(project.id);

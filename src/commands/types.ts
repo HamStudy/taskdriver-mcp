@@ -31,18 +31,26 @@ export interface ServiceContext {
   lease: LeaseService;
 }
 
+type CommandParameterTypes = 'string' | 'number' | 'boolean' | 'array';
 // Parameter definition for commands with type inference support
-export interface CommandParameter {
+export interface CommandParameter<T extends CommandParameterTypes = CommandParameterTypes> {
   readonly name: string;
-  readonly type: 'string' | 'number' | 'boolean' | 'array';
+  readonly type: T;
   readonly description: string;
   readonly required?: boolean;
-  readonly default?: any;
+  readonly default?: ParameterFromName<T>;
   readonly choices?: readonly string[];
   readonly alias?: string | readonly string[];
   readonly positional?: boolean;
   readonly validation?: any; // Joi schema
 }
+
+type ParameterFromName<T extends CommandParameterTypes> =
+  T extends 'string' ? string :
+  T extends 'number' ? number :
+  T extends 'boolean' ? boolean :
+  T extends 'array' ? string[] :
+  never;
 
 // Type inference magic - extract argument types from parameter definitions
 type ParameterType<T extends CommandParameter> = 
@@ -64,7 +72,7 @@ export type InferArgs<T extends readonly CommandParameter[]> = {
 } & { verbose?: boolean }; // Optional verbose flag for all commands
 
 // Command definition interface with type inference
-export interface CommandDefinition<T extends readonly CommandParameter[] = readonly CommandParameter[], R extends CommandResult<any> = CommandResult<any>, NAME extends string = string> {
+export interface CommandDefinition<T extends readonly CommandParameter[] = readonly CommandParameter[], R extends CommandResult<Record<string, unknown> | Record<string, unknown>[]> = CommandResult<any>, NAME extends string = string> {
   // Identity
   name: NAME;
   mcpName: CamelToSnakeCase<NAME>;      // MCP tool name (with underscores)
@@ -112,6 +120,14 @@ export interface CommandResult<T = any> {
   data?: T;
   error?: string;
   message?: string;
+  pagination?: {
+    total: number;
+    offset: number;
+    limit: number;
+    rangeStart: number;
+    rangeEnd: number;
+    hasMore: boolean;
+  };
 }
 
 export type TaskTypes<T extends CommandDefinition> = {

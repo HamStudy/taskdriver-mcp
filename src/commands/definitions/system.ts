@@ -2,9 +2,9 @@
  * System Commands (Health Check, Lease Management)
  */
 
-import chalk from 'chalk';
+import chalk from '../../utils/chalk.js';
 import { CommandParameter, defineCommand, TaskTypes } from '../types.js';
-import { findProjectByNameOrId } from '../utils.js';
+// No longer need findProjectByNameOrId import
 
 export interface HealthCheckData {
   status?: string;
@@ -213,8 +213,7 @@ export const getLeaseStats = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -264,8 +263,7 @@ export const cleanupExpiredLeases = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,

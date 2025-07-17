@@ -2,12 +2,11 @@
  * Task Type Management Commands
  */
 
-import chalk from 'chalk';
+import chalk from '../../utils/chalk.js';
 import { CommandParameter, defineCommand, TaskTypes } from '../types.js';
 import { TaskType } from '../../types/TaskType.js';
 import { 
-  readContentFromFileOrValue, 
-  findProjectByNameOrId 
+  readContentFromFileOrValue 
 } from '../utils.js';
 
 // Task type interfaces
@@ -185,8 +184,7 @@ export const createTaskType = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -258,8 +256,7 @@ export const listTaskTypes = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -427,8 +424,7 @@ export const updateTaskType = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,

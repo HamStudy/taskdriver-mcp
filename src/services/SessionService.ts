@@ -4,7 +4,8 @@ import {
   Session, 
   SessionCreateInput, 
   SessionUpdateInput,
-  Project
+  Project,
+  AgentStatus
 } from '../types/index.js';
 import type { StorageProvider } from '../storage/StorageProvider.js';
 import { AgentService } from './AgentService.js';
@@ -121,7 +122,7 @@ export class SessionService {
    */
   async validateSession(sessionToken: string): Promise<{
     session: Session;
-    agent: any; // AgentStatus or null in lease-based model
+    agent: AgentStatus | null; // AgentStatus or null in lease-based model
     project: Project;
   } | null> {
     const session = await this.authenticateSession(sessionToken);

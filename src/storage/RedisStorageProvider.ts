@@ -9,7 +9,6 @@ import {
   TaskUpdateInput, 
   TaskFilters,
   TaskResult,
-  TaskInput,
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
@@ -21,6 +20,7 @@ import {
   SessionUpdateInput
 } from '../types/index.js';
 import { BaseStorageProvider } from './StorageProvider.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Redis storage provider for TaskDriver
@@ -28,14 +28,10 @@ import { BaseStorageProvider } from './StorageProvider.js';
  */
 export class RedisStorageProvider extends BaseStorageProvider {
   private client: RedisClientType;
-  private connectionString: string;
   private keyPrefix: string;
-  private database: number;
 
   constructor(connectionString: string, database: number = 0, keyPrefix: string = 'taskdriver:') {
     super();
-    this.connectionString = connectionString;
-    this.database = database;
     this.keyPrefix = keyPrefix;
     this.client = createClient({
       url: connectionString,
@@ -88,14 +84,6 @@ export class RedisStorageProvider extends BaseStorageProvider {
     return `${this.keyPrefix}project:${projectId}:running`;
   }
 
-  private agentKey(agentId: string): string {
-    return `${this.keyPrefix}agent:${agentId}`;
-  }
-
-  private agentsSetKey(projectId: string): string {
-    return `${this.keyPrefix}project:${projectId}:agents`;
-  }
-
 
   private sessionKey(sessionId: string): string {
     return `${this.keyPrefix}session:${sessionId}`;
@@ -143,7 +131,6 @@ export class RedisStorageProvider extends BaseStorageProvider {
       config: {
         defaultMaxRetries: input.config?.defaultMaxRetries ?? 3,
         defaultLeaseDurationMinutes: input.config?.defaultLeaseDurationMinutes ?? 10,
-        reaperIntervalMinutes: input.config?.reaperIntervalMinutes ?? 1,
       },
       stats: {
         totalTasks: 0,
@@ -190,6 +177,28 @@ export class RedisStorageProvider extends BaseStorageProvider {
     }
     
     return updatedProject;
+  }
+
+  async getProjectByNameOrId(nameOrId: string): Promise<Project | null> {
+    this.ensureInitialized();
+    
+    // First try to get by ID
+    const projectById = await this.getProject(nameOrId);
+    if (projectById) {
+      return projectById;
+    }
+    
+    // If not found by ID, search by name
+    const projectIds = await this.client.sMembers(this.projectsSetKey());
+    
+    for (const projectId of projectIds) {
+      const project = await this.getProject(projectId);
+      if (project && project.name === nameOrId) {
+        return project;
+      }
+    }
+    
+    return null;
   }
 
   async updateProject(projectId: string, input: ProjectUpdateInput): Promise<Project> {
@@ -346,6 +355,33 @@ export class RedisStorageProvider extends BaseStorageProvider {
       this.client.del(this.taskTypeKey(typeId)),
       this.client.sRem(this.taskTypesSetKey(taskType.projectId), typeId)
     ]);
+  }
+
+  async getTaskTypeByNameOrId(projectNameOrId: string, nameOrId: string): Promise<TaskType | null> {
+    this.ensureInitialized();
+    
+    // First get the project
+    const project = await this.getProjectByNameOrId(projectNameOrId);
+    if (!project) {
+      return null;
+    }
+    
+    // First try to get by ID
+    const taskTypeById = await this.getTaskType(nameOrId);
+    if (taskTypeById && taskTypeById.projectId === project.id) {
+      return taskTypeById;
+    }
+    
+    // If not found by ID, search by name within the project
+    const taskTypes = await this.listTaskTypes(project.id);
+    
+    for (const taskType of taskTypes) {
+      if (taskType.name === nameOrId) {
+        return taskType;
+      }
+    }
+    
+    return null;
   }
 
   // Task operations
@@ -531,23 +567,69 @@ export class RedisStorageProvider extends BaseStorageProvider {
     }
   }
 
-  // CRITICAL: Atomic task assignment using Redis transactions
-  async assignTask(projectId: string, agentName: string): Promise<Task | null> {
+  // CRITICAL: Atomic task assignment using Redis Lua scripts
+  async getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult> {
     this.ensureInitialized();
     
-    // Use Redis WATCH for optimistic concurrency control
+    logger.trace('Redis: Starting getNextTask', { projectId, agentName });
+    
+    // Check if agent already has a running task
+    if (agentName) {
+      const runningTaskIds = await this.client.sMembers(this.runningTasksKey(projectId));
+      
+      for (const taskId of runningTaskIds) {
+        const task = await this.getTask(taskId);
+        if (task && task.assignedTo === agentName) {
+          logger.trace('Redis: Found existing task for agent', { taskId, agentName });
+          return {
+            task,
+            agentName: agentName
+          };
+        }
+      }
+    }
+    
+    // Use Redis Lua script for atomic task assignment
     const queueKey = this.queuedTasksKey(projectId);
     const runningKey = this.runningTasksKey(projectId);
     
-    // Pop a task from the queue atomically
-    const taskId = await this.client.rPop(queueKey);
+    // Lua script for atomic task assignment
+    const luaScript = `
+      local queueKey = KEYS[1]
+      local runningKey = KEYS[2]
+      
+      -- Pop a task from the queue
+      local taskId = redis.call('RPOP', queueKey)
+      if not taskId then
+        return nil
+      end
+      
+      -- Add to running set
+      redis.call('SADD', runningKey, taskId)
+      
+      return taskId
+    `;
+    
+    const taskId = await this.client.eval(luaScript, {
+      keys: [queueKey, runningKey],
+      arguments: []
+    }) as string | null;
+    
     if (!taskId) {
-      return null; // No tasks available
+      logger.trace('Redis: No tasks available in queue', { projectId });
+      return {
+        task: null,
+        agentName: agentName || `agent-${Date.now()}`
+      };
     }
     
     const task = await this.getTask(taskId);
     if (!task) {
-      return null; // Task was deleted
+      logger.trace('Redis: Task not found after dequeue', { taskId });
+      return {
+        task: null,
+        agentName: agentName || `agent-${Date.now()}`
+      };
     }
     
     // Get task type to determine lease duration
@@ -557,12 +639,13 @@ export class RedisStorageProvider extends BaseStorageProvider {
     }
     
     const now = new Date();
+    const assignedAgentName = agentName || `agent-${Date.now()}`;
     const leaseExpiresAt = new Date(now.getTime() + taskType.leaseDurationMinutes * 60 * 1000);
     
     // Create attempt record
     const attempt: TaskAttempt = {
       id: uuidv4(),
-      agentName,
+      agentName: assignedAgentName,
       startedAt: now,
       status: 'running',
       leaseExpiresAt,
@@ -572,149 +655,77 @@ export class RedisStorageProvider extends BaseStorageProvider {
     const updatedTask: Task = {
       ...task,
       status: 'running',
-      assignedTo: agentName,
+      assignedTo: assignedAgentName,
       assignedAt: now,
       leaseExpiresAt,
       attempts: [...task.attempts, attempt]
     };
     
-    // Update task and add to running set
-    await Promise.all([
-      this.client.hSet(this.taskKey(taskId), {
-        data: JSON.stringify(updatedTask)
-      }),
-      this.client.sAdd(runningKey, taskId)
-    ]);
-    
-    return updatedTask;
-  }
-
-  // Agent operations
-  async createAgent(input: AgentCreateInput): Promise<Agent> {
-    this.ensureInitialized();
-    
-    const now = new Date();
-    const agent: Agent = {
-      id: uuidv4(),
-      name: input.name || `agent-${Date.now()}`,
-      projectId: input.projectId,
-      status: 'idle',
-      apiKeyHash: input.apiKeyHash || '',
-      createdAt: now,
-      lastSeen: now,
-    };
-
-    await Promise.all([
-      this.client.hSet(this.agentKey(agent.id), {
-        data: JSON.stringify(agent)
-      }),
-      this.client.sAdd(this.agentsSetKey(input.projectId), agent.id)
-    ]);
-
-    return agent;
-  }
-
-  async getAgent(agentId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    const agentData = await this.client.hGet(this.agentKey(agentId), 'data');
-    if (!agentData) {
-      return null;
-    }
-
-    const agent: Agent = JSON.parse(agentData);
-    // Parse dates
-    agent.createdAt = new Date(agent.createdAt);
-    agent.lastSeen = new Date(agent.lastSeen);
-
-    return agent;
-  }
-
-  async getAgentByName(agentName: string, projectId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    const agentIds = await this.client.sMembers(this.agentsSetKey(projectId));
-    
-    for (const agentId of agentIds) {
-      const agent = await this.getAgent(agentId);
-      if (agent && agent.name === agentName) {
-        return agent;
-      }
-    }
-    
-    return null;
-  }
-
-  async getAgentByApiKey(hashedApiKey: string, projectId: string): Promise<Agent | null> {
-    this.ensureInitialized();
-    
-    const agentIds = await this.client.sMembers(this.agentsSetKey(projectId));
-    
-    for (const agentId of agentIds) {
-      const agent = await this.getAgent(agentId);
-      if (agent && agent.apiKeyHash === hashedApiKey) {
-        return agent;
-      }
-    }
-    
-    return null;
-  }
-
-  async updateAgent(agentId: string, input: AgentUpdateInput): Promise<Agent> {
-    this.ensureInitialized();
-    
-    const currentAgent = await this.getAgent(agentId);
-    if (!currentAgent) {
-      throw new Error(`Agent ${agentId} not found`);
-    }
-    
-    const updatedAgent: Agent = {
-      ...currentAgent,
-      ...input,
-      id: currentAgent.id,
-      projectId: currentAgent.projectId,
-      createdAt: currentAgent.createdAt,
-    };
-    
-    await this.client.hSet(this.agentKey(agentId), {
-      data: JSON.stringify(updatedAgent)
+    // Update task
+    await this.client.hSet(this.taskKey(taskId), {
+      data: JSON.stringify(updatedTask)
     });
     
-    return updatedAgent;
+    logger.trace('Redis: Task assigned successfully', { taskId, agentName: assignedAgentName });
+    
+    return {
+      task: updatedTask,
+      agentName: assignedAgentName
+    };
   }
 
-  async listAgents(projectId: string): Promise<Agent[]> {
+  // Agent status operations (for monitoring/compatibility)
+  // These work with the lease data, no persistent agent storage
+  async listActiveAgents(projectId: string): Promise<AgentStatus[]> {
     this.ensureInitialized();
     
-    const agentIds = await this.client.sMembers(this.agentsSetKey(projectId));
+    const runningTaskIds = await this.client.sMembers(this.runningTasksKey(projectId));
+    const agentMap = new Map<string, AgentStatus>();
     
-    const agents: Agent[] = [];
-    for (const agentId of agentIds) {
-      const agent = await this.getAgent(agentId);
-      if (agent) {
-        agents.push(agent);
+    for (const taskId of runningTaskIds) {
+      const task = await this.getTask(taskId);
+      if (task?.assignedTo) {
+        const agentName = task.assignedTo;
+        
+        if (!agentMap.has(agentName)) {
+          agentMap.set(agentName, {
+            name: agentName,
+            projectId,
+            status: 'working',
+            currentTaskId: task.id,
+            assignedAt: task.assignedAt || new Date(),
+            leaseExpiresAt: task.leaseExpiresAt
+          });
+        }
       }
     }
     
-    // Sort by creation date (newest first)
-    return agents.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return Array.from(agentMap.values());
   }
 
-  async deleteAgent(agentId: string): Promise<void> {
+  async getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null> {
     this.ensureInitialized();
     
-    const agent = await this.getAgent(agentId);
-    if (!agent) {
-      throw new Error(`Agent ${agentId} not found`);
+    const runningTaskIds = await this.client.sMembers(this.runningTasksKey(projectId));
+    
+    for (const taskId of runningTaskIds) {
+      const task = await this.getTask(taskId);
+      if (task?.assignedTo === agentName) {
+        return {
+          name: agentName,
+          projectId,
+          status: 'working',
+          currentTaskId: task.id,
+          assignedAt: task.assignedAt || new Date(),
+          leaseExpiresAt: task.leaseExpiresAt
+        };
+      }
     }
-
-    await Promise.all([
-      this.client.del(this.agentKey(agentId)),
-      this.client.sRem(this.agentsSetKey(agent.projectId), agentId)
-    ]);
+    
+    return null;
   }
 
-  async completeTask(taskId: string, agentName: string, result: TaskResult): Promise<void> {
+  async completeTask(taskId: string, _agentName: string, result: TaskResult): Promise<void> {
     this.ensureInitialized();
     
     const task = await this.getTask(taskId);
@@ -755,7 +766,7 @@ export class RedisStorageProvider extends BaseStorageProvider {
     ]);
   }
 
-  async failTask(taskId: string, agentName: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
+  async failTask(taskId: string, _agentName: string, result: TaskResult, canRetry: boolean = true): Promise<void> {
     this.ensureInitialized();
     
     const task = await this.getTask(taskId);
@@ -776,9 +787,17 @@ export class RedisStorageProvider extends BaseStorageProvider {
       }
     }
     
-    // Determine if we should retry
-    const shouldRetry = canRetry && task.retryCount < task.maxRetries;
+    // Determine if we should retry - FIXED: use < instead of <=
     const newRetryCount = task.retryCount + 1;
+    const shouldRetry = canRetry && newRetryCount < task.maxRetries;
+    
+    logger.trace('Redis: failTask retry logic', { 
+      taskId, 
+      newRetryCount, 
+      maxRetries: task.maxRetries, 
+      shouldRetry,
+      canRetry 
+    });
     
     const updatedTask: Task = {
       ...task,
@@ -883,6 +902,17 @@ export class RedisStorageProvider extends BaseStorageProvider {
     });
   }
 
+  async countAvailableTasks(projectId: string): Promise<number> {
+    this.ensureInitialized();
+    
+    const tasks = await this.listTasks(projectId);
+    const now = new Date();
+    
+    return tasks.filter(task => 
+      task.status === 'queued' || 
+      (task.status === 'running' && task.leaseExpiresAt && task.leaseExpiresAt < now)
+    ).length;
+  }
 
   // Utility operations
   async findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null> {
@@ -959,9 +989,11 @@ export class RedisStorageProvider extends BaseStorageProvider {
         completedTasks += tasks.filter(t => t.status === 'completed').length;
         failedTasks += tasks.filter(t => t.status === 'failed').length;
         
-        const agents = await this.listAgents(projectId);
-        totalAgents += agents.length;
-        activeAgents += agents.filter(a => a.status === 'idle' || a.status === 'working').length;
+        // Use lease-based agent counting instead of persistent agents
+        const activeAgentStatuses = await this.listActiveAgents(projectId);
+        const currentActiveAgents = activeAgentStatuses.length;
+        totalAgents += currentActiveAgents;
+        activeAgents += currentActiveAgents;
       }
       
       return {
@@ -1083,22 +1115,22 @@ export class RedisStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async findSessionsByAgent(agentName: string, projectId: string): Promise<Session[]> {
+  async findSessionsByAgent(agentName: string, _projectId: string): Promise<Session[]> {
     this.ensureInitialized();
     
-    // Use the agent index to find sessions
-    const agent = await this.getAgentByName(agentName, projectId);
-    if (!agent) {
-      return [];
-    }
-
-    const sessionIds = await this.client.sMembers(this.sessionAgentSetKey(agent.id));
+    // For Redis implementation, we'll search through project sessions
+    // This could be optimized with better indexing if needed
+    const projectIds = await this.client.sMembers(this.projectsSetKey());
     const sessions: Session[] = [];
 
-    for (const sessionId of sessionIds) {
-      const session = await this.getSession(sessionId);
-      if (session && session.projectId === projectId) {
-        sessions.push(session);
+    for (const projectId of projectIds) {
+      const sessionIds = await this.client.sMembers(this.sessionProjectSetKey(projectId));
+      
+      for (const sessionId of sessionIds) {
+        const session = await this.getSession(sessionId);
+        if (session && session.agentName === agentName && session.projectId === _projectId) {
+          sessions.push(session);
+        }
       }
     }
 
@@ -1114,16 +1146,4 @@ export class RedisStorageProvider extends BaseStorageProvider {
     return 0;
   }
 
-  // Lease-based agent operations - stubs for now
-  async getNextTask(projectId: string, agentName?: string): Promise<TaskAssignmentResult> {
-    throw new Error('RedisStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
-  }
-
-  async listActiveAgents(projectId: string): Promise<AgentStatus[]> {
-    throw new Error('RedisStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
-  }
-
-  async getAgentStatus(agentName: string, projectId: string): Promise<AgentStatus | null> {
-    throw new Error('RedisStorageProvider lease-based operations not yet implemented - use FileStorageProvider');
-  }
 }

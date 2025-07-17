@@ -2,12 +2,11 @@
  * Project Management Commands
  */
 
-import chalk from 'chalk';
+import chalk from '../../utils/chalk.js';
 import { CommandParameter, defineCommand, TaskTypes } from '../types.js';
 import { Project, ProjectStatus } from '../../types/Project.js';
 import { 
-  readContentFromFileOrValue, 
-  findProjectByNameOrId 
+  readContentFromFileOrValue 
 } from '../utils.js';
 
 // Formatting helpers
@@ -43,7 +42,6 @@ function formatProject(project: Project, verbose: boolean = true): string {
     output += `\n${chalk.bold('Configuration:')}\n`;
     output += `  Max Retries: ${project.config.defaultMaxRetries || 'Not set'}\n`;
     output += `  Lease Duration: ${project.config.defaultLeaseDurationMinutes || 'Not set'} minutes\n`;
-    output += `  Reaper Interval: ${project.config.reaperIntervalMinutes || 'Not set'} minutes\n`;
   }
   
   if (project.stats) {
@@ -207,7 +205,15 @@ export const createProject = defineCommand({
   name: 'createProject',
   mcpName: 'create_project',
   cliName: 'create-project',
-  description: 'Create a new project workspace for organizing tasks and agents. Use this when starting a new workflow, breaking down complex work into manageable pieces, or organizing tasks by domain/topic. Projects contain task types (templates), tasks (work items), and agents (workers).',
+  description: `Create a new project workspace for organizing tasks and agents.
+
+Use this when starting a new workflow, breaking down complex work into manageable pieces, or organizing tasks by domain/topic. Projects contain task types (templates), tasks (work items), and agents (workers).
+
+This is particularly useful if you're doing a large task that involves a lot of steps; instead of trying to do it all at once,
+create a project and then add a task for each item you need to follow up on. If there are many items or files that need to be processed in the same way,
+such as test files to review, files to update, interfaces to refactor, etc, you can create a special task type with a template with instructions. This will
+help you keep from losing track of important items. Once you're done reviewing what needs to be done you start processing tasks one at a time and even
+if you need to compact history you can still see what needs to be done.`,
   parameters: createProjectParams,
   returnDataType: 'single',
   formatResult: (result, args) => {
@@ -216,22 +222,7 @@ export const createProject = defineCommand({
     }
     
     const project = result.data!;
-    let output = `Project Details:
-  ID: ${project.id}
-  Name: ${project.name}
-  Status: ${project.status}
-  Description: ${project.description}
-  Created: ${new Date(project.createdAt).toLocaleString()}`;
-    
-    if (project.instructions) {
-      if (args.verbose) {
-        output += `\n  Instructions: ${project.instructions}`;
-      } else {
-        output += `\n  Instructions: ${project.instructions.length} characters`;
-      }
-    }
-    
-    return output;
+    return formatProject(project, args.verbose);
   },
   discoverability: {
     triggerKeywords: ['create', 'new', 'project', 'workspace', 'organize', 'start', 'begin', 'initialize'],
@@ -255,8 +246,7 @@ export const createProject = defineCommand({
       instructions,
       config: {
         defaultMaxRetries: args.maxRetries,
-        defaultLeaseDurationMinutes: args.leaseDuration,
-        reaperIntervalMinutes: 1
+        defaultLeaseDurationMinutes: args.leaseDuration
       }
     });
 
@@ -370,7 +360,9 @@ export const getProject = defineCommand({
   name: 'getProject',
   mcpName: 'get_project',
   cliName: 'get-project',
-  description: 'Get detailed information about a specific project including instructions, configuration, statistics, and metadata. Returns project instructions that agents need to understand their role and objectives. Use this to understand project settings, check task counts, or verify project configuration before creating tasks.',
+  description: `Get detailed information about a specific project including instructions, configuration, statistics, and metadata. Returns project instructions that agents need to understand their role and objectives. Use this to understand project settings, check task counts, or verify project configuration before creating tasks.
+  
+You should always call this before getNextTask to ensure you have the latest project context and instructions, which could have been updated as issues were identified while processing past items.`,
   parameters: getProjectParams,
   returnDataType: 'single',
   formatResult: (result, args) => {
@@ -383,8 +375,7 @@ export const getProject = defineCommand({
   },
   async handler(context, args) {
     // Find project by name or ID
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     
     if (!project) {
       return {
@@ -434,7 +425,7 @@ const updateProjectParams = [
     name: 'maxRetries',
     type: 'number',
     description: 'Default maximum retries for tasks',
-    alias: ['max-retries', 'r']
+    alias: ['max-retries', 'r'],
   },
   {
     name: 'leaseDuration',
@@ -455,7 +446,9 @@ export const updateProject = defineCommand({
   name: 'updateProject',
   mcpName: 'update_project',
   cliName: 'update-project',
-  description: 'Update project properties such as description, instructions, status, or configuration. Use this to modify project settings, close completed projects, or update instructions for agents working on the project.',
+  description: `Update project properties such as description, instructions, status, or configuration. Use this to modify project settings, close completed projects, or update instructions for agents working on the project.
+  
+If issues are identified while doing tasks which will apply to the entire project it is a good idea to update the project instructions so that nothing is lost or forgotten.`,
   parameters: updateProjectParams,
   returnDataType: 'single',
   formatResult: (result, args) => {
@@ -468,8 +461,7 @@ export const updateProject = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -526,8 +518,7 @@ export const getProjectStats = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -540,6 +531,7 @@ export const getProjectStats = defineCommand({
     return {
       success: true,
       data: {
+        projectId: project.id,
         projectName: project.name,
         stats
       }

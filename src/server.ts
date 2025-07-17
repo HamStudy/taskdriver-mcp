@@ -7,10 +7,11 @@ import {
   AuthenticatedRequest,
   Session,
   Project,
-  ApiResponse
+  ApiResponse,
+  TaskFilters
 } from './types/index.js';
 import { TaskDriverConfig } from './config/types.js';
-import { createStorageProvider } from './storage/index.js';
+import { createStorageProvider, StorageProvider } from './storage/index.js';
 import { 
   ProjectService,
   TaskTypeService, 
@@ -23,6 +24,36 @@ import { validate, isValidationError } from './utils/validation.js';
 import { createProjectSchema, createTaskTypeSchema, createTaskSchema, createAgentSchema } from './utils/validation.js';
 import { logger, logHttpRequest, createOperationLogger } from './utils/logger.js';
 import { metrics, TaskDriverMetrics } from './utils/metrics.js';
+import { Server } from 'http';
+
+// Type guards for error handling
+function isError(error: unknown): error is Error {
+  return error instanceof Error;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (isError(error)) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function getErrorStack(error: unknown): string | undefined {
+  if (isError(error)) {
+    return error.stack;
+  }
+  return undefined;
+}
+
+function logUnexpectedError(error: unknown, context: string, correlationId?: string): void {
+  const stack = getErrorStack(error);
+  
+  logger.error(`Unexpected error in ${context}`, {
+    correlationId,
+    errorMessage: getErrorMessage(error),
+    stack
+  });
+}
 
 // Extend Express Request to include session info
 declare global {
@@ -41,9 +72,9 @@ declare global {
  */
 export class TaskDriverHttpServer {
   private app: express.Application;
-  private server: any;
+  private server: Server | undefined;
   private config: TaskDriverConfig;
-  private storage: any;
+  private storage: StorageProvider | undefined;
   private services: {
     project: ProjectService;
     taskType: TaskTypeService;
@@ -65,26 +96,27 @@ export class TaskDriverHttpServer {
     this.storage = createStorageProvider(this.config);
     await this.storage.initialize();
 
-    // Initialize services
-    this.services = {
-      project: new ProjectService(this.storage),
-      taskType: new TaskTypeService(this.storage, null as any), // Will be set after
-      task: new TaskService(this.storage, null as any, null as any), // Will be set after
-      agent: new AgentService(this.storage, null as any, null as any), // Will be set after
-      lease: new LeaseService(this.storage),
-      session: new SessionService(this.storage, null as any, null as any, this.config.security.sessionTimeout / 1000)
-    };
-
-    // Set up service dependencies
-    this.services.taskType = new TaskTypeService(this.storage, this.services.project);
-    this.services.task = new TaskService(this.storage, this.services.project, this.services.taskType);
-    this.services.agent = new AgentService(this.storage, this.services.project, this.services.task);
-    this.services.session = new SessionService(
+    // Initialize services with proper dependencies
+    const projectService = new ProjectService(this.storage);
+    const taskTypeService = new TaskTypeService(this.storage, projectService);
+    const taskService = new TaskService(this.storage, projectService, taskTypeService);
+    const agentService = new AgentService(this.storage, projectService, taskService);
+    const leaseService = new LeaseService(this.storage);
+    const sessionService = new SessionService(
       this.storage, 
-      this.services.agent, 
-      this.services.project, 
+      agentService, 
+      projectService, 
       this.config.security.sessionTimeout / 1000
     );
+
+    this.services = {
+      project: projectService,
+      taskType: taskTypeService,
+      task: taskService,
+      agent: agentService,
+      lease: leaseService,
+      session: sessionService
+    };
   }
 
   async start(): Promise<void> {
@@ -107,10 +139,11 @@ export class TaskDriverHttpServer {
         });
       });
     } catch (error) {
+      logUnexpectedError(error, 'start TaskDriver HTTP server');
       logger.error('Failed to start TaskDriver HTTP server', { 
         host: this.config.server.host, 
         port: this.config.server.port 
-      }, error as Error);
+      });
       throw error;
     }
   }
@@ -121,7 +154,7 @@ export class TaskDriverHttpServer {
       
       if (this.server) {
         await new Promise<void>((resolve) => {
-          this.server.close(() => {
+          this.server?.close(() => {
             logger.info('HTTP server stopped successfully');
             resolve();
           });
@@ -136,7 +169,7 @@ export class TaskDriverHttpServer {
       metrics.setGauge('taskdriver_server_started', 0);
       logger.info('TaskDriver HTTP server shutdown complete');
     } catch (error) {
-      logger.error('Error during server shutdown', {}, error as Error);
+      logUnexpectedError(error, 'server shutdown');
       throw error;
     }
   }
@@ -168,7 +201,7 @@ export class TaskDriverHttpServer {
       
       // Override res.end to log response
       const originalEnd = res.end.bind(res);
-      res.end = function(chunk?: any, encoding?: any, cb?: any) {
+      const newEndFn = function(chunk, encoding, cb) {
         const duration = Date.now() - startTime;
         
         // Log HTTP request completion
@@ -187,7 +220,8 @@ export class TaskDriverHttpServer {
         metrics.decrementGauge('taskdriver_http_requests_in_flight');
         
         return originalEnd(chunk, encoding, cb);
-      };
+      } as typeof originalEnd;
+      res.end = newEndFn;
       
       next();
     });
@@ -224,7 +258,13 @@ export class TaskDriverHttpServer {
       
       res.on('finish', () => {
         const duration = Date.now() - start;
-        console.log(`${req.method} ${req.path} ${res.statusCode} ${duration}ms [${req.correlationId}]`);
+        logger.debug(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`, {
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode,
+          duration,
+          correlationId: req.correlationId
+        });
       });
       
       next();
@@ -344,9 +384,7 @@ export class TaskDriverHttpServer {
       res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
       res.send(prometheusMetrics);
     } catch (error) {
-      logger.error('Failed to generate Prometheus metrics', {
-        correlationId: req.correlationId
-      }, error as Error);
+      logUnexpectedError(error, 'generate Prometheus metrics', req.correlationId);
       this.sendError(res, 'Failed to generate metrics', 500, req.correlationId);
     }
   }
@@ -359,9 +397,7 @@ export class TaskDriverHttpServer {
       };
       this.sendSuccess(res, jsonMetrics);
     } catch (error) {
-      logger.error('Failed to generate JSON metrics', {
-        correlationId: req.correlationId
-      }, error as Error);
+      logUnexpectedError(error, 'generate JSON metrics', req.correlationId);
       this.sendError(res, 'Failed to generate metrics', 500, req.correlationId);
     }
   }
@@ -411,11 +447,7 @@ export class TaskDriverHttpServer {
 
       next();
     } catch (error) {
-      logger.error('Unexpected error during authentication', {
-        correlationId: req.correlationId,
-        method: req.method,
-        path: req.path
-      }, error as Error);
+      logUnexpectedError(error, 'authentication', req.correlationId);
       this.sendError(res, 'Authentication failed', 401, req.correlationId);
     }
   }
@@ -427,15 +459,15 @@ export class TaskDriverHttpServer {
         correlationId: req.correlationId
       });
       
-      const health = await this.storage.healthCheck();
+      const health = await this.storage?.healthCheck();
       const responseData = {
-        status: health.healthy ? 'healthy' : 'unhealthy',
+        status: health?.healthy ? 'healthy' : 'unhealthy',
         timestamp: new Date().toISOString(),
         version: process.env.npm_package_version || '1.0.0',
         storage: health
       };
       
-      if (!health.healthy) {
+      if (!health?.healthy) {
         logger.warn('Health check failed - storage unhealthy', {
           correlationId: req.correlationId,
           storage: health
@@ -444,9 +476,7 @@ export class TaskDriverHttpServer {
       
       res.json(responseData);
     } catch (error) {
-      logger.error('Health check endpoint failed with exception', {
-        correlationId: req.correlationId
-      }, error as Error);
+      logUnexpectedError(error, 'health check endpoint', req.correlationId);
       
       res.status(503).json({
         status: 'unhealthy',
@@ -505,19 +535,16 @@ export class TaskDriverHttpServer {
         session: result.session,
         resumed: result.resumed || false
       });
-    } catch (error: any) {
-      logger.error('Login failed with exception', {
-        correlationId: req.correlationId,
-        agentName: req.body?.agentName,
-        projectId: req.body?.projectId
-      }, error);
+    } catch (error) {
+      logUnexpectedError(error, 'login', req.correlationId);
       
       // Update error metrics
+      const errorName = isError(error) ? error.name : 'unknown';
       metrics.incrementCounter('taskdriver_login_errors_total', {
-        error_type: error.name || 'unknown'
+        error_type: errorName
       });
       
-      this.sendError(res, error.message, 400, req.correlationId);
+      this.sendError(res, getErrorMessage(error), 400, req.correlationId);
     }
   }
 
@@ -541,8 +568,9 @@ export class TaskDriverHttpServer {
       const includeClosed = req.query.includeClosed === 'true';
       const projects = await this.services!.project.listProjects(includeClosed);
       this.sendSuccess(res, projects);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'list projects', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -551,11 +579,12 @@ export class TaskDriverHttpServer {
       const input = validate(createProjectSchema, req.body);
       const project = await this.services!.project.createProject(input);
       this.sendSuccess(res, project, 201);
-    } catch (error: any) {
+    } catch (error) {
       if (isValidationError(error)) {
-        this.sendError(res, error.message, 400);
+        this.sendError(res, getErrorMessage(error), 400);
       } else {
-        this.sendError(res, error.message);
+        logUnexpectedError(error, 'create project', req.correlationId);
+        this.sendError(res, getErrorMessage(error));
       }
     }
   }
@@ -569,8 +598,9 @@ export class TaskDriverHttpServer {
         return;
       }
       this.sendSuccess(res, project);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'get project', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -579,8 +609,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const project = await this.services!.project.updateProject(projectId, req.body);
       this.sendSuccess(res, project);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -589,8 +620,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       await this.services!.project.deleteProject(projectId);
       this.sendSuccess(res, { message: 'Project deleted successfully' });
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -599,8 +631,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const stats = await this.services!.project.getProjectStatus(projectId);
       this.sendSuccess(res, stats);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -609,8 +642,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const taskTypes = await this.services!.taskType.listTaskTypes(projectId);
       this.sendSuccess(res, taskTypes);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -621,8 +655,9 @@ export class TaskDriverHttpServer {
         projectId: req.params.projectId
       });
       this.sendSuccess(res, taskType, 201);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -635,8 +670,9 @@ export class TaskDriverHttpServer {
         return;
       }
       this.sendSuccess(res, taskType);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -645,8 +681,9 @@ export class TaskDriverHttpServer {
       const typeId = this.validateRequiredParam(req.params.typeId, 'Type ID');
       const taskType = await this.services!.taskType.updateTaskType(typeId, req.body);
       this.sendSuccess(res, taskType);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -655,25 +692,27 @@ export class TaskDriverHttpServer {
       const typeId = this.validateRequiredParam(req.params.typeId, 'Type ID');
       await this.services!.taskType.deleteTaskType(typeId);
       this.sendSuccess(res, { message: 'Task type deleted successfully' });
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
   private async handleListTasks(req: Request, res: Response): Promise<void> {
     try {
-      const filters: any = {
-        status: req.query.status as string,
-        typeId: req.query.typeId as string,
-        assignedTo: req.query.assignedTo as string,
+      const filters: TaskFilters = {
+        status: req.query.status as TaskFilters['status'],
+        typeId: req.query.typeId as TaskFilters['typeId'],
+        assignedTo: req.query.assignedTo as TaskFilters['assignedTo'],
         limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
         offset: req.query.offset ? parseInt(req.query.offset as string) : undefined
       };
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const tasks = await this.services!.task.listTasks(projectId, filters);
       this.sendSuccess(res, tasks);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'list tasks', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -684,8 +723,9 @@ export class TaskDriverHttpServer {
         projectId: req.params.projectId
       });
       this.sendSuccess(res, task, 201);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'create task', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -701,8 +741,9 @@ export class TaskDriverHttpServer {
       
       const result = await this.services!.task.createTasksBulk(projectId, tasks);
       this.sendSuccess(res, result, 201);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'create tasks bulk', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -715,8 +756,9 @@ export class TaskDriverHttpServer {
         return;
       }
       this.sendSuccess(res, task);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -725,8 +767,9 @@ export class TaskDriverHttpServer {
       const taskId = this.validateRequiredParam(req.params.taskId, 'Task ID');
       const task = await this.services!.task.updateTask(taskId, req.body);
       this.sendSuccess(res, task);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -735,8 +778,9 @@ export class TaskDriverHttpServer {
       const taskId = this.validateRequiredParam(req.params.taskId, 'Task ID');
       await this.services!.task.deleteTask(taskId);
       this.sendSuccess(res, { message: 'Task deleted successfully' });
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -745,8 +789,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const agents = await this.services!.agent.listActiveAgents(projectId);
       this.sendSuccess(res, agents);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -766,8 +811,9 @@ export class TaskDriverHttpServer {
         return;
       }
       this.sendSuccess(res, agent);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -787,8 +833,9 @@ export class TaskDriverHttpServer {
       const agentName = this.validateRequiredParam(req.params.agentName, 'Agent Name');
       const task = await this.services!.agent.getNextTask(agentName, projectId);
       this.sendSuccess(res, task);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -798,8 +845,9 @@ export class TaskDriverHttpServer {
       const taskId = this.validateRequiredParam(req.params.taskId, 'Task ID');
       const task = await this.services!.agent.completeTask(agentName, projectId, taskId, result);
       this.sendSuccess(res, task);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -809,8 +857,9 @@ export class TaskDriverHttpServer {
       const taskId = this.validateRequiredParam(req.params.taskId, 'Task ID');
       const task = await this.services!.agent.failTask(agentName, projectId, taskId, error);
       this.sendSuccess(res, task);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -819,8 +868,9 @@ export class TaskDriverHttpServer {
       const projectId = this.validateRequiredParam(req.params.projectId, 'Project ID');
       const result = await this.services!.lease.cleanupExpiredLeases(projectId);
       this.sendSuccess(res, result);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -828,8 +878,9 @@ export class TaskDriverHttpServer {
     try {
       // Lease extension not implemented yet
       this.sendError(res, 'Lease extension not implemented', 501);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 
@@ -854,8 +905,9 @@ export class TaskDriverHttpServer {
       
       const session = await this.services!.session.updateSessionData(sessionToken, req.body.data || {});
       this.sendSuccess(res, session);
-    } catch (error: any) {
-      this.sendError(res, error.message);
+    } catch (error) {
+      logUnexpectedError(error, 'handler operation', req.correlationId);
+      this.sendError(res, getErrorMessage(error));
     }
   }
 

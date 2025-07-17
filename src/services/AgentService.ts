@@ -90,7 +90,7 @@ export class AgentService {
   /**
    * Extend the lease on a task (for long-running operations)
    */
-  async extendTaskLease(taskId: string, agentName: string, additionalMinutes: number): Promise<void> {
+  async extendTaskLease(agentName: string, projectId: string, taskId: string, additionalMinutes: number): Promise<void> {
     // Get the task to validate agent assignment and get project
     const task = await this.taskService.getTask(taskId);
     if (!task) {
@@ -106,7 +106,7 @@ export class AgentService {
     }
 
     // Validate project exists
-    await this.projectService.validateProjectAccess(task.projectId);
+    await this.projectService.validateProjectAccess(projectId);
 
     // Extend the lease
     await this.storage.extendLease(taskId, additionalMinutes);

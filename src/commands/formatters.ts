@@ -3,7 +3,7 @@
  * Supports both human-readable and JSON formats
  */
 
-import chalk from 'chalk';
+import chalk from '../utils/chalk.js';
 import { COMMAND_DEFINITIONS, CommandNames, InferCommandFromName, InferReturnTypeFromCommandName, InferArgsFromCommandName } from './index.js';
 
 

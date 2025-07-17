@@ -16,7 +16,7 @@ export function readContentFromFileOrValue(value: string): string {
       const absolutePath = resolve(filePath);
       return readFileSync(absolutePath, 'utf-8').trim();
     } catch (error: any) {
-      throw new Error(`Failed to read file '${filePath}': ${error.message}`);
+      throw new Error(`Failed to read file '${filePath}': ${error?.message ?? error}`);
     }
   }
   return value;

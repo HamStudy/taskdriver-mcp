@@ -7,7 +7,6 @@ import {
   TaskUpdateInput, 
   TaskFilters,
   TaskResult,
-  TaskInput,
   TaskType, 
   TaskTypeCreateInput, 
   TaskTypeUpdateInput,
@@ -29,7 +28,8 @@ export interface StorageProvider {
   
   // Project operations
   createProject(input: ProjectCreateInput): Promise<Project>;
-  getProject(projectId: string): Promise<Project | null>;
+  getProject(projectNameOrId: string): Promise<Project | null>;
+  getProjectByNameOrId(nameOrId: string): Promise<Project | null>;
   updateProject(projectId: string, input: ProjectUpdateInput): Promise<Project>;
   listProjects(includeClosed?: boolean): Promise<Project[]>;
   deleteProject(projectId: string): Promise<void>;
@@ -37,6 +37,7 @@ export interface StorageProvider {
   // Task Type operations
   createTaskType(input: TaskTypeCreateInput): Promise<TaskType>;
   getTaskType(typeId: string): Promise<TaskType | null>;
+  getTaskTypeByNameOrId(projectNameOrId: string, nameOrId: string): Promise<TaskType | null>;
   updateTaskType(typeId: string, input: TaskTypeUpdateInput): Promise<TaskType>;
   listTaskTypes(projectId: string): Promise<TaskType[]>;
   deleteTaskType(typeId: string): Promise<void>;
@@ -63,6 +64,9 @@ export interface StorageProvider {
   findExpiredLeases(): Promise<Task[]>;
   requeueTask(taskId: string): Promise<void>;
   extendLease(taskId: string, additionalMinutes: number): Promise<void>;
+  
+  // Count available tasks (queued or with expired leases)
+  countAvailableTasks(projectId: string): Promise<number>;
   
   
   // Utility operations
@@ -116,13 +120,15 @@ export abstract class BaseStorageProvider implements StorageProvider {
 
   // All interface methods must be implemented by concrete classes
   abstract createProject(input: ProjectCreateInput): Promise<Project>;
-  abstract getProject(projectId: string): Promise<Project | null>;
+  abstract getProject(projectNameOrId: string): Promise<Project | null>;
+  abstract getProjectByNameOrId(nameOrId: string): Promise<Project | null>;
   abstract updateProject(projectId: string, input: ProjectUpdateInput): Promise<Project>;
   abstract listProjects(includeClosed?: boolean): Promise<Project[]>;
   abstract deleteProject(projectId: string): Promise<void>;
 
   abstract createTaskType(input: TaskTypeCreateInput): Promise<TaskType>;
   abstract getTaskType(typeId: string): Promise<TaskType | null>;
+  abstract getTaskTypeByNameOrId(projectNameOrId: string, nameOrId: string): Promise<TaskType | null>;
   abstract updateTaskType(typeId: string, input: TaskTypeUpdateInput): Promise<TaskType>;
   abstract listTaskTypes(projectId: string): Promise<TaskType[]>;
   abstract deleteTaskType(typeId: string): Promise<void>;
@@ -146,6 +152,8 @@ export abstract class BaseStorageProvider implements StorageProvider {
   abstract requeueTask(taskId: string): Promise<void>;
   abstract extendLease(taskId: string, additionalMinutes: number): Promise<void>;
 
+  // Count available tasks (queued or with expired leases)
+  abstract countAvailableTasks(projectId: string): Promise<number>;
 
   abstract findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null>;
   abstract getTaskHistory(taskId: string): Promise<Task[]>;

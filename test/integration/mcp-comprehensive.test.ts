@@ -597,10 +597,10 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           expect(result.isError).toBeFalsy();
           const response = JSON.parse(result.content[0].text);
           expect(response.success).toBe(true);
-          expect(response.data.task).toBeDefined();
-          expect(response.data.task.id).toBe(taskId);
-          expect(response.data.task.assignedTo).toBe('test-agent');
-          expect(response.data.agentName).toBe('test-agent');
+          expect(response.data).toBeDefined();
+          expect(response.data.id).toBe(taskId);
+          expect(response.data.assignedTo).toBe('test-agent');
+          expect(response.agentName).toBe('test-agent');
         });
 
         it('should return error when no tasks available', async () => {
@@ -631,8 +631,8 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           expect(result.isError).toBeTruthy();
           const response = JSON.parse(result.content[0].text);
           expect(response.success).toBe(false);
-          expect(response.data.task).toBeNull();
-          expect(response.data.agentName).toBe('second-agent');
+          expect(response.data).toBeNull();
+          expect(response.agentName).toBe('second-agent');
           expect(response.error).toContain('No tasks available');
         });
 
@@ -732,11 +732,11 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           expect(result.isError).toBeFalsy();
           const response = JSON.parse(result.content[0].text);
           expect(response.success).toBe(true);
-          expect(response.data.task).toBeDefined();
-          expect(response.data.task.id).toBe(taskId);
-          expect(response.data.task.assignedTo).toBe(agentName);
-          expect(response.data.task.assignedAt).toBeDefined();
-          expect(response.data.agentName).toBe(agentName);
+          expect(response.data).toBeDefined();
+          expect(response.data.id).toBe(taskId);
+          expect(response.data.assignedTo).toBe(agentName);
+          expect(response.data.assignedAt).toBeDefined();
+          expect(response.agentName).toBe(agentName);
         });
 
         it('should complete assigned task', async () => {
@@ -774,7 +774,7 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           const response = JSON.parse(result.content[0].text);
           expect(response.success).toBe(true);
           expect(response.data.status).toBe('completed');
-          expect(response.data.result).toBe('Task completed successfully');
+          expect(response.data.result.output).toBe('Task completed successfully');
         });
 
         it('should fail task with error', async () => {
@@ -809,7 +809,7 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           const response = JSON.parse(result.content[0].text);
           expect(response.success).toBe(true);
           expect(response.data.status).toBe('failed');
-          expect(response.data.error).toBe('Task failed due to invalid input');
+          expect(response.data.result.error).toBe('Task failed due to invalid input');
         });
       });
 
@@ -1118,8 +1118,8 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           } as any);
           const get1Response = JSON.parse(get1Result.content[0].text);
           expect(get1Response.success).toBe(true);
-          expect(get1Response.data.task).toBeDefined();
-          const task1Id = get1Response.data.task.id;
+          expect(get1Response.data).toBeDefined();
+          const task1Id = get1Response.data.id;
 
           const get2Result = await context.handlers.handleToolCall({
             method: 'tools/call',
@@ -1133,8 +1133,8 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
           } as any);
           const get2Response = JSON.parse(get2Result.content[0].text);
           expect(get2Response.success).toBe(true);
-          expect(get2Response.data.task).toBeDefined();
-          const task2Id = get2Response.data.task.id;
+          expect(get2Response.data).toBeDefined();
+          const task2Id = get2Response.data.id;
 
           // 6. Complete one task, fail another
           const complete1Result = await context.handlers.handleToolCall({
@@ -1193,7 +1193,8 @@ describe('MCP Integration - Comprehensive Tool Testing', () => {
             params: {
               name: 'list_tasks',
               arguments: {
-                projectId
+                projectId,
+                includeCompleted: true
               }
             }
           } as any);

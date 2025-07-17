@@ -6,12 +6,80 @@ import { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { formatCommandResult, OutputFormat } from './formatters.js';
 import { GenericCommandDefinition } from './index.js';
 import { CommandDefinition, ServiceContext } from './types.js';
+import { logger } from '../utils/logger.js';
+
+// Type guards for error handling
+function isError(error: unknown): error is Error {
+  return error instanceof Error;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (isError(error)) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function getErrorStack(error: unknown): string | undefined {
+  if (isError(error)) {
+    return error.stack;
+  }
+  return undefined;
+}
+
+function logUnexpectedError(error: unknown, context: string): void {
+  const stack = getErrorStack(error);
+  
+  logger.error(`Unexpected error in ${context}`, {
+    errorMessage: getErrorMessage(error),
+    stack
+  });
+}
+
+// Type definitions for CLI and MCP args
+interface CliArgs {
+  [key: string]: unknown;
+  format?: OutputFormat;
+}
+
+interface McpArgs {
+  [key: string]: unknown;
+  format?: OutputFormat;
+}
+
+interface YargsCommandBuilder {
+  option: (name: string, config: YargsOptionConfig) => YargsCommandBuilder;
+  positional: (name: string, config: YargsPositionalConfig) => YargsCommandBuilder;
+}
+
+interface YargsOptionConfig {
+  type: 'string' | 'number' | 'boolean' | 'array';
+  describe: string;
+  alias?: string | string[] | readonly string[];
+  default?: unknown;
+  choices?: string[] | readonly string[];
+}
+
+interface YargsPositionalConfig {
+  describe: string;
+  type: 'string' | 'number' | 'boolean' | 'array';
+  default?: unknown;
+  choices?: string[] | readonly string[];
+}
+
+interface JsonSchemaProperty {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  description: string;
+  enum?: string[] | readonly string[];
+  default?: unknown;
+  items?: { type: string };
+}
 
 /**
  * Generate MCP tool from command definition
  */
 export function generateMcpTool(def: CommandDefinition): Tool {
-  const properties: Record<string, any> = {};
+  const properties: Record<string, JsonSchemaProperty> = {};
   const required: string[] = [];
 
   // Add format parameter to all MCP tools
@@ -23,7 +91,8 @@ export function generateMcpTool(def: CommandDefinition): Tool {
   };
 
   for (const param of def.parameters) {
-    const schema: any = {
+    const schema: JsonSchemaProperty = {
+      type: 'string', // default, will be overridden below
       description: param.description
     };
 
@@ -46,7 +115,7 @@ export function generateMcpTool(def: CommandDefinition): Tool {
 
     // Add choices as enum
     if (param.choices) {
-      schema.enum = param.choices;
+      schema.enum = Array.isArray(param.choices) ? [...param.choices] : param.choices;
     }
 
     // Add default value
@@ -144,7 +213,7 @@ export function generateCliCommand(def: CommandDefinition) {
   const command = commandParts.join(' ');
 
   // Builder function for yargs
-  const builder = (yargs: any) => {
+  const builder = (yargs: YargsCommandBuilder) => {
     let result = yargs;
 
     // Add global format option for all commands
@@ -169,7 +238,7 @@ export function generateCliCommand(def: CommandDefinition) {
         });
       } else {
         // Handle option parameters
-        const optionConfig: any = {
+        const optionConfig: YargsOptionConfig = {
           type: param.type === 'number' ? 'number' : 
                 param.type === 'boolean' ? 'boolean' :
                 param.type === 'array' ? 'array' : 'string',
@@ -197,7 +266,7 @@ export function generateCliCommand(def: CommandDefinition) {
  * Generate CLI handler from command definition
  */
 export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DEF, context: ServiceContext) {
-  return async (argv: any) => {
+  return async (argv: CliArgs) => {
     try {
       // Extract format option
       const format = (argv.format || 'human') as OutputFormat;
@@ -209,15 +278,16 @@ export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DE
       // Handle file reading for parameters that might use @file syntax
       for (const param of def.parameters) {
         if (param.type === 'string' && processedArgs[param.name] && typeof processedArgs[param.name] === 'string') {
-          const value = processedArgs[param.name];
+          const value = processedArgs[param.name] as string;
           if (value.startsWith('@')) {
             // Handle file reading for CLI
             try {
               const { readContentFromFileOrValue } = await import('./utils.js');
               processedArgs[param.name] = readContentFromFileOrValue(value);
-            } catch (error: any) {
+            } catch (error: unknown) {
+              logUnexpectedError(error, 'CLI file reading');
               const formatted = formatCommandResult(
-                { success: false, error: `Failed to read file for ${param.name}: ${error.message}` },
+                { success: false, error: `Failed to read file for ${param.name}: ${getErrorMessage(error)}` },
                 def.cliName,
                 format,
                 processedArgs
@@ -229,7 +299,7 @@ export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DE
         }
       }
       
-      const result = await def.handler(context, processedArgs);
+      const result = await def.handler(context, processedArgs as any);
       
       // Format and display result
       const formatted = formatCommandResult(result, def.cliName, format, processedArgs);
@@ -243,9 +313,10 @@ export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DE
       }
       
       process.exit(formatted.exitCode);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      logUnexpectedError(error, 'CLI handler execution');
       const formatted = formatCommandResult(
-        { success: false, error: error.message || 'Unknown error' },
+        { success: false, error: getErrorMessage(error) },
         def.cliName,
         argv.format || 'human',
         argv
@@ -260,7 +331,7 @@ export function generateCliHandler<DEF extends GenericCommandDefinition>(def: DE
  * Generate MCP handler from command definition
  */
 export function generateMcpHandler<DEF extends GenericCommandDefinition>(def: DEF, context: ServiceContext) {
-  return async (args: any): Promise<CallToolResult> => {
+  return async (args: McpArgs): Promise<CallToolResult> => {
     try {
       // Extract format parameter (default to 'json' for MCP tools)
       const format = (args.format || 'json') as OutputFormat;
@@ -269,7 +340,7 @@ export function generateMcpHandler<DEF extends GenericCommandDefinition>(def: DE
       const handlerArgs = { ...args };
       delete handlerArgs.format;
       
-      const result = await def.handler(context, handlerArgs);
+      const result = await def.handler(context, handlerArgs as any);
       
       // Format output based on requested format
       if (format === 'json') {
@@ -295,12 +366,13 @@ export function generateMcpHandler<DEF extends GenericCommandDefinition>(def: DE
           isError: formatted.exitCode !== 0
         };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      logUnexpectedError(error, 'MCP handler execution');
       // Extract format for error formatting
       const format = (args.format || 'json') as OutputFormat;
       const errorResult = {
         success: false,
-        error: error.message || 'Unknown error occurred'
+        error: getErrorMessage(error)
       };
       
       if (format === 'json') {

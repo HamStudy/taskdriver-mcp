@@ -2,12 +2,10 @@
  * Task Management Commands
  */
 
-import chalk from 'chalk';
+import chalk from '../../utils/chalk.js';
 import { CommandParameter, CommandResult, defineCommand, TaskTypes } from '../types.js';
 import { Task } from '../../types/Task.js';
 import { 
-  findProjectByNameOrId, 
-  findTaskTypeByNameOrId,
   parseJsonSafely 
 } from '../utils.js';
 
@@ -221,13 +219,12 @@ export const createTask = defineCommand({
       return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
     }
     
-    const task = result.data?.task;
+    const task = result.data;
     return formatTask(task!);
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -235,19 +232,10 @@ export const createTask = defineCommand({
       };
     }
 
-    // Get task types for the project
-    const taskTypes = await context.taskType.listTaskTypes(project.id);
-    if (taskTypes.length === 0) {
-      return {
-        success: false,
-        error: `No task types found in project '${project.name}'. Create a task type first.`
-      };
-    }
-
     // Find task type or use first available
     let taskType;
     if (args.type) {
-      taskType = findTaskTypeByNameOrId(taskTypes, args.type);
+      taskType = await context.storage.getTaskTypeByNameOrId(project.id, args.type);
       if (!taskType) {
         return {
           success: false,
@@ -255,6 +243,14 @@ export const createTask = defineCommand({
         };
       }
     } else {
+      // Get first available task type
+      const taskTypes = await context.taskType.listTaskTypes(project.id);
+      if (taskTypes.length === 0) {
+        return {
+          success: false,
+          error: `No task types found in project '${project.name}'. Create a task type first.`
+        };
+      }
       taskType = taskTypes[0];
     }
 
@@ -342,8 +338,7 @@ export const createTasksBulk = defineCommand({
   },
   async handler(context, args) {
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -377,7 +372,7 @@ export const createTasksBulk = defineCommand({
 
     return {
       success: true,
-      data: result.createdTasks,
+      data: result,
       message: `Bulk task creation completed: ${result.tasksCreated} created, ${result.errors.length} errors`
     };
   }
@@ -448,8 +443,8 @@ export const listTasks = defineCommand({
       return `${chalk.red('Error:')} ${result.error || 'Unknown error'}`;
     }
     
-    const tasks = result.data?.tasks || [];
-    const pagination = result.data?.pagination;
+    const tasks = result.data || [];
+    const pagination = result.pagination;
     return formatTaskList(tasks, pagination);
   },
   async handler(context, args) {
@@ -462,8 +457,7 @@ export const listTasks = defineCommand({
     }
 
     // Find project
-    const projects = await context.project.listProjects(true);
-    const project = findProjectByNameOrId(projects, args.projectId);
+    const project = await context.storage.getProjectByNameOrId(args.projectId);
     if (!project) {
       return {
         success: false,
@@ -511,11 +505,22 @@ export const listTasks = defineCommand({
       })
     );
 
+    // Create pagination object
+    const pagination = {
+      total: totalCount,
+      offset: offset,
+      limit: limit || totalCount,
+      rangeStart: totalCount > 0 ? offset + 1 : 0,
+      rangeEnd: offset + tasksWithInstructions.length,
+      hasMore: (offset + tasksWithInstructions.length) < totalCount
+    };
+
     return {
       success: true,
       data: tasksWithInstructions,
+      pagination,
       message: `Found ${tasksWithInstructions.length} tasks (${totalCount} total)`
-    };
+    } satisfies CommandResult<Task[]>;
   }
 });
 
