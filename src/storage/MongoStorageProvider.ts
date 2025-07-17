@@ -370,6 +370,23 @@ export class MongoStorageProvider extends BaseStorageProvider {
       throw new Error(`Task type not found: ${input.typeId}`);
     }
 
+    // Check for duplicates if required
+    if (taskType.duplicateHandling !== 'allow') {
+      const existingTask = await this.findDuplicateTask(
+        input.projectId, 
+        input.typeId, 
+        input.variables
+      );
+
+      if (existingTask) {
+        if (taskType.duplicateHandling === 'fail') {
+          throw new Error(`Duplicate task found for type ${taskType.name} with variables ${JSON.stringify(input.variables)}`);
+        } else { // 'ignore'
+          return existingTask;
+        }
+      }
+    }
+
     const taskId = input.id || uuidv4();
     const now = new Date();
 
@@ -429,30 +446,47 @@ export class MongoStorageProvider extends BaseStorageProvider {
     this.ensureInitialized();
     const collections = this.ensureCollections();
 
-    const query: any = { projectId };
+    const matchStage: any = { projectId };
 
     if (filters) {
       if (filters.status) {
-        query.status = filters.status;
+        matchStage.status = filters.status;
       }
       if (filters.assignedTo) {
-        query.assignedTo = filters.assignedTo;
+        matchStage.assignedTo = filters.assignedTo;
       }
       if (filters.typeId) {
-        query.typeId = filters.typeId;
+        matchStage.typeId = filters.typeId;
       }
     }
 
     const offset = filters?.offset || 0;
     const limit = filters?.limit || 100;
 
+    // Use aggregation to join with task types and get typeName
     const docs = await collections.tasks
-      .find(query)
-      .skip(offset)
-      .limit(limit)
+      .aggregate([
+        { $match: matchStage },
+        {
+          $lookup: {
+            from: 'taskTypes',
+            localField: 'typeId',
+            foreignField: 'id',
+            as: 'taskType'
+          }
+        },
+        {
+          $addFields: {
+            typeName: { $arrayElemAt: ['$taskType.name', 0] }
+          }
+        },
+        { $unset: 'taskType' }, // Remove the joined taskType array
+        { $skip: offset },
+        { $limit: limit }
+      ])
       .toArray();
 
-    return docs.map(doc => this.documentToTask(doc));
+    return docs.map(doc => this.documentToTask(doc as TaskDocument));
   }
 
   async deleteTask(taskId: string): Promise<void> {
@@ -698,18 +732,6 @@ export class MongoStorageProvider extends BaseStorageProvider {
   }
 
   // Utility operations
-  async findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null> {
-    this.ensureInitialized();
-    const collections = this.ensureCollections();
-
-    const doc = await collections.tasks.findOne({
-      projectId,
-      typeId,
-      ...(variables && { variables })
-    });
-
-    return doc ? this.documentToTask(doc) : null;
-  }
 
   async getTaskHistory(taskId: string): Promise<Task[]> {
     this.ensureInitialized();
@@ -881,5 +903,20 @@ export class MongoStorageProvider extends BaseStorageProvider {
   private documentToSession(doc: SessionDocument): Session {
     const { _id, ...session } = doc;
     return session as Session;
+  }
+
+  async findDuplicateTask(projectId: string, typeId: string, variables?: Record<string, string>): Promise<Task | null> {
+    this.ensureInitialized();
+    const collections = this.ensureCollections();
+    
+    const query = {
+      projectId,
+      typeId,
+      status: { $ne: 'failed' as const },
+      variables: variables || {}
+    };
+    
+    const doc = await collections.tasks.findOne(query);
+    return doc ? this.documentToTask(doc) : null;
   }
 }

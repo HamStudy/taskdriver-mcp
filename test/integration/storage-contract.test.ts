@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { FileStorageProvider } from '../../src/storage/FileStorageProvider.js';
+import { MongoStorageProvider } from '../../src/storage/MongoStorageProvider.js';
+import { RedisStorageProvider } from '../../src/storage/RedisStorageProvider.js';
 import { StorageProvider } from '../../src/storage/StorageProvider.js';
 import { ProjectService } from '../../src/services/ProjectService.js';
 import { TaskTypeService } from '../../src/services/TaskTypeService.js';
@@ -8,6 +10,8 @@ import { AgentService } from '../../src/services/AgentService.js';
 import { LeaseService } from '../../src/services/LeaseService.js';
 import { createTestDataDir } from '../fixtures/index.js';
 import { rmSync, existsSync } from 'fs';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import { RedisMemoryServer } from 'redis-memory-server';
 
 /**
  * Storage Provider Contract Tests
@@ -35,32 +39,35 @@ describe('Storage Provider Contract', () => {
           rmSync(context.testDataDir, { recursive: true, force: true });
         }
       }
-    }
-    // TODO: Add MongoDB and Redis providers when test environment supports them
-    // {
-    //   name: 'MongoStorage',
-    //   createProvider: () => {
-    //     const storage = new MongoStorageProvider({
-    //       connectionString: process.env.TEST_MONGODB_URL || 'mongodb://localhost:27017/taskdriver-test'
-    //     });
-    //     return { storage };
-    //   },
-    //   cleanup: async (context: any) => {
-    //     await context.storage.dropDatabase?.();
-    //   }
-    // },
-    // {
-    //   name: 'RedisStorage',
-    //   createProvider: () => {
-    //     const storage = new RedisStorageProvider({
-    //       connectionString: process.env.TEST_REDIS_URL || 'redis://localhost:6379/1'
-    //     });
-    //     return { storage };
-    //   },
-    //   cleanup: async (context: any) => {
-    //     await context.storage.flushAll?.();
-    //   }
-    // }
+    },
+    ...(process.env.SKIP_MONGO_TESTS ? [] : [{
+      name: 'MongoStorage',
+      createProvider: async () => {
+        const mongoServer = await MongoMemoryServer.create();
+        const connectionString = mongoServer.getUri();
+        const storage = new MongoStorageProvider(connectionString, 'test-contract');
+        return { storage, mongoServer };
+      },
+      cleanup: async (context: any) => {
+        await context.storage.close();
+        await context.mongoServer.stop();
+      }
+    }]),
+    ...(process.env.SKIP_REDIS_TESTS ? [] : [{
+      name: 'RedisStorage',
+      createProvider: async () => {
+        const redisServer = new RedisMemoryServer();
+        const host = await redisServer.getHost();
+        const port = await redisServer.getPort();
+        const connectionString = `redis://${host}:${port}`;
+        const storage = new RedisStorageProvider(connectionString, 0, 'contract:');
+        return { storage, redisServer };
+      },
+      cleanup: async (context: any) => {
+        await context.storage.close();
+        await context.redisServer.stop();
+      }
+    }])
   ];
 
   // Run the same behavioral tests for each storage provider
@@ -75,7 +82,7 @@ describe('Storage Provider Contract', () => {
       let leaseService: LeaseService;
 
       beforeEach(async () => {
-        context = providerConfig.createProvider();
+        context = await providerConfig.createProvider();
         storage = context.storage;
         await storage.initialize();
         
@@ -89,7 +96,7 @@ describe('Storage Provider Contract', () => {
 
       afterEach(async () => {
         await storage.close();
-        providerConfig.cleanup(context);
+        await providerConfig.cleanup(context);
       });
 
       it('should atomically assign tasks preventing race conditions', async () => {
@@ -756,4 +763,22 @@ describe('Storage Provider Contract', () => {
       });
     });
   });
+
+  // Skip MongoDB and Redis tests in CI environments where they may not be available
+  const shouldSkipProvider = (providerName: string) => {
+    if (providerName === 'MongoStorage' && process.env.SKIP_MONGO_TESTS === 'true') {
+      return true;
+    }
+    if (providerName === 'RedisStorage' && process.env.SKIP_REDIS_TESTS === 'true') {
+      return true;
+    }
+    return false;
+  };
+
+  // Filter out providers that should be skipped
+  const activeProviders = storageProviders.filter(provider => !shouldSkipProvider(provider.name));
+
+  if (activeProviders.length < storageProviders.length) {
+    console.log(`Skipping some storage providers due to environment constraints.`);
+  }
 });

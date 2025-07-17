@@ -2,6 +2,7 @@ export interface Task {
   id: string;
   projectId: string;
   typeId: string;
+  typeName?: string;  // Task type name (populated in listTasks)
   description: string;  // Human-readable description
   instructions?: string;  // Final instructions (only for non-template tasks)
   variables?: Record<string, string>;  // Variable values

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 /**
  * TaskDriver CLI - Generated from unified command definitions
@@ -52,6 +52,18 @@ async function buildCli() {
     .help()
     .version()
     .alias('h', 'help');
+
+  // Add special MCP command
+  cli = cli.command('mcp', 'Run as MCP server for stdio transport', {}, async () => {
+    const { runMCPServer } = await import('./mcp.js');
+    await runMCPServer();
+  });
+
+  // Add special server command
+  cli = cli.command('server', 'Run as HTTP REST API server', {}, async () => {
+    const { runHttpServer } = await import('./http.js');
+    await runHttpServer();
+  });
 
   // Add each command from definitions
   for (const def of COMMAND_DEFINITIONS) {

@@ -1044,6 +1044,18 @@ export class FileStorageProvider extends BaseStorageProvider {
       const data = await this.readProjectData(projectId);
       let tasks = [...data.tasks];
       
+      // Create a map of typeId to typeName for efficient lookup
+      const taskTypeMap = new Map<string, string>();
+      for (const taskType of data.taskTypes) {
+        taskTypeMap.set(taskType.id, taskType.name);
+      }
+      
+      // Add typeName to each task
+      tasks = tasks.map(task => ({
+        ...task,
+        typeName: taskTypeMap.get(task.typeId)
+      }));
+      
       // Apply filters
       if (filters) {
         if (filters.status) {

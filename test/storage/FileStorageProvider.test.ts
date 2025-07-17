@@ -442,6 +442,21 @@ describe('FileStorageProvider', () => {
         expect(failedTask!.status).toBe('failed'); // Should be permanently failed
       });
     });
+
+    describe('listTasks', () => {
+      it('should return tasks with typeName populated', async () => {
+        const task = await storage.createTask(createMockTaskInput({
+          projectId: project.id,
+          typeId: taskType.id
+        }));
+        
+        const tasks = await storage.listTasks(project.id);
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].id).toBe(task.id);
+        expect(tasks[0].typeId).toBe(taskType.id);
+        expect(tasks[0].typeName).toBe(taskType.name);
+      });
+    });
   });
 
   describe('Lease-based Agent Operations', () => {

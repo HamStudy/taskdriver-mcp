@@ -523,10 +523,23 @@ export class RedisStorageProvider extends BaseStorageProvider {
     const taskIds = await this.client.sMembers(this.tasksSetKey(projectId));
     
     let tasks: Task[] = [];
+    
+    // Get all task types for this project to create a lookup map
+    const taskTypes = await this.listTaskTypes(projectId);
+    const taskTypeMap = new Map<string, string>();
+    for (const taskType of taskTypes) {
+      taskTypeMap.set(taskType.id, taskType.name);
+    }
+    
     for (const taskId of taskIds) {
       const task = await this.getTask(taskId);
       if (task) {
-        tasks.push(task);
+        // Add typeName to the task
+        const taskWithTypeName = {
+          ...task,
+          typeName: taskTypeMap.get(task.typeId)
+        };
+        tasks.push(taskWithTypeName);
       }
     }
     

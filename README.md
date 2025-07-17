@@ -1,6 +1,60 @@
-# TaskDriver MCP Server
+# TaskDriver MCP
 
-TaskDriver is a sophisticated task management and orchestration system designed for LLM agents. It provides a complete solution for managing tasks, agents, and project workflows across multiple deployment modes.
+A Model Context Protocol (MCP) server for managing and orchestrating LLM agents as task runners.
+
+## Installation
+
+```bash
+# Install globally
+npm install -g taskdriver-mcp
+
+# Or use directly with npx/bunx
+npx taskdriver-mcp --help
+bunx taskdriver-mcp --help
+```
+
+## Quick Start
+
+### CLI Usage
+
+```bash
+# Create a new project
+npx taskdriver-mcp create-project "my-project" "My first project"
+
+# List projects
+npx taskdriver-mcp list-projects
+
+# Get project details
+npx taskdriver-mcp get-project "my-project"
+
+# Create a task type template
+npx taskdriver-mcp create-task-type "my-project" "analysis"
+
+# Create tasks
+npx taskdriver-mcp create-task "my-project"
+
+# Get next task for an agent
+npx taskdriver-mcp get-next-task "my-project" "my-agent"
+
+# Complete a task
+npx taskdriver-mcp complete-task "my-agent" "my-project" "task-id" "Task completed"
+```
+
+### MCP Server Mode
+
+Run TaskDriver as an MCP server for stdio transport:
+
+```bash
+npx taskdriver-mcp mcp
+```
+
+### HTTP Server Mode
+
+Run TaskDriver as an HTTP REST API server:
+
+```bash
+npx taskdriver-mcp server
+```
 
 ## Features
 
@@ -13,48 +67,6 @@ TaskDriver is a sophisticated task management and orchestration system designed 
 - **Comprehensive Monitoring**: Health checks, metrics, and detailed project statistics
 - **Batch Processing**: Group related tasks and track batch completion
 - **Retry Logic**: Configurable retry policies for failed tasks
-
-## Quick Start
-
-### Installation
-
-```bash
-# Install dependencies
-bun install
-
-# Build the project
-bun run build
-
-# Install CLI globally (optional)
-npm install -g .
-```
-
-### Basic Usage
-
-1. **Start the MCP Server**:
-   ```bash
-   bun run mcp
-   ```
-
-2. **Create a Project**:
-   ```bash
-   taskdriver create-project "my-project" "My first project"
-   ```
-
-3. **Create a Task Type**:
-   ```bash
-   taskdriver create-task-type "my-project" "analysis" --template "Analyze {{target}} for {{focus}}"
-   ```
-
-4. **Create Tasks**:
-   ```bash
-   taskdriver create-task "my-project" "task-type-id" "Analyze codebase for security issues"
-   ```
-
-5. **Register an Agent**:
-   ```bash
-   taskdriver register-agent "my-project" "my-agent"
-   ```
 
 ## Deployment Modes
 

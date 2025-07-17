@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "taskdriver-mcp": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        "run",
+        "mcp"
+      ],
+      "env": {
+        "NODE_ENV": "development",
+        "PORT": "3000"
+      },
+      "cwd": "/Users/richard/code/taskdriver-mcp"
+    },
+    "language-server": {
+      "type": "stdio",
+      "command": "mcp-language-server",
+      "args": [
+        "--workspace",
+        "/Users/richard/code/taskdriver-mcp",
+        "--lsp",
+        "./node_modules/.bin/typescript-language-server",
+        "--",
+        "--stdio"
+      ],
+      "env": {}
+    }
+  }
+}
