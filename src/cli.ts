@@ -3,7 +3,7 @@
 /**
  * TaskDriver CLI - Generated from unified command definitions
  */
-
+import esMain from 'es-main';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from './utils/chalk.js';
@@ -97,9 +97,11 @@ export async function runCLI(args?: string[]) {
 }
 
 // Run when executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (esMain(import.meta)) {
   main().catch(error => {
     console.error(chalk.red('❌ CLI error:'), error.message);
     process.exit(1);
   });
+} else {
+  console.warn(chalk.yellow('⚠️  TaskDriver CLI loaded as module, use runCLI() to execute commands'));
 }
