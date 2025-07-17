@@ -11,24 +11,68 @@ import {
 
 // Task formatting helpers
 
-function formatRelativeTime(date: Date): string {
-  const now = new Date();
-  const then = new Date(date);
-  const diffMs = now.getTime() - then.getTime();
-  
-  const seconds = Math.floor(diffMs / 1000);
+/**
+ * Formats the time difference between two dates.
+ * @param start The start date.
+ * @param end The end date.
+ * @returns A string representing the time difference.
+ */
+export function formatTimeDifference(start: Date, end: Date): string {
+  const diffMs = end.getTime() - start.getTime();
+
+  const seconds = Math.abs(Math.floor(diffMs / 1000));
+  const onlySeconds = seconds % 60;
   const minutes = Math.floor(seconds / 60);
+  const onlyMinutes = minutes % 60;
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
   
-  if (days > 0) {
-    return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (hours > 48) {
+    return `${days} day${days > 1 ? 's' : ''}`;
+  } else if (hours > 24) {
+    return `${hours} hour${hours > 1 ? 's' : ''}`;
   } else if (hours > 0) {
-    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    return `${hours} hour${hours > 1 ? 's' : ''} ${onlyMinutes} min`;
+  } else if (minutes > 10) {
+    return `${minutes} min${minutes > 1 ? 's' : ''}`;
   } else if (minutes > 0) {
-    return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+    return `${minutes} min ${onlySeconds} sec`;
   } else {
-    return `${seconds} sec${seconds > 1 ? 's' : ''} ago`;
+    return `${seconds} sec`;
+  }
+}
+
+export function formatRelativeTime(date: Date | undefined): string {
+  if (!date) return 'unknown';
+
+  const now = new Date();
+  const then = new Date(date);
+  const suffix = then > now ? 'from now' : 'ago';
+  return `${formatTimeDifference(then, now)} ${suffix}`;
+}
+
+function formatLeaseStatus(task: Task): string {
+  const now = new Date();
+  
+  if (task.status === 'completed') {
+    return `done ${formatRelativeTime(task.completedAt || task.updatedAt)}`;
+  } else if (task.status === 'failed') {
+    return `failed ${formatRelativeTime(task.failedAt || task.updatedAt)}`;
+  } else if (task.status === 'queued') {
+    return `created ${formatRelativeTime(task.createdAt)}`;
+  } else if (task.status === 'running' && task.leaseExpiresAt) {
+    const leaseExpiry = new Date(task.leaseExpiresAt);
+    const diffMs = leaseExpiry.getTime() - now.getTime();
+    
+    if (diffMs <= 0) {
+      return chalk.red('<lease expired>');
+    }
+    
+    const timeLeft = formatTimeDifference(now, leaseExpiry);
+    
+    return `running until ${timeLeft}`;
+  } else {
+    return `created ${formatRelativeTime(task.createdAt)}`;
   }
 }
 
@@ -107,36 +151,36 @@ function formatTaskList(tasks: (Task & { typeName?: string })[], pagination?: an
   const taskIds = tasks.map(t => t.id.substring(0, 10));
   const typeNames = tasks.map(t => t.typeName || t.typeId || '-');
   const assignedTos = tasks.map(t => t.assignedTo || '-');
-  const createdTimes = tasks.map(t => formatRelativeTime(t.createdAt));
+  const statusTimes = tasks.map(t => formatLeaseStatus(t));
   
   const taskIdWidth = Math.max(...taskIds.map(id => id.length), 'TASK ID'.length);
   const typeWidth = Math.max(...typeNames.map(type => type.length), 'TYPE'.length);
   const statusValues = ['queued', 'running', 'completed', 'failed'];
   const statusWidth = Math.max(...statusValues.map(s => s.toUpperCase().length), 'STATUS'.length);
   const assignedWidth = Math.max(...assignedTos.map(a => a.length), 'ASSIGNED TO'.length);
-  const createdWidth = Math.max(...createdTimes.map(c => c.length), 'CREATED'.length);
+  const statusTimeWidth = Math.max(...statusTimes.map(st => getVisualWidth(st)), 'STATUS'.length);
   
   output += chalk.bold(
     'TASK ID'.padEnd(taskIdWidth) + ' | ' +
     'TYPE'.padEnd(typeWidth) + ' | ' +
     'STATUS'.padEnd(statusWidth) + ' | ' +
     'ASSIGNED TO'.padEnd(assignedWidth) + ' | ' +
-    'CREATED'.padEnd(createdWidth)
+    'STATUS'.padEnd(statusTimeWidth)
   ) + '\n';
-  output += chalk.gray('-'.repeat(taskIdWidth + 3 + typeWidth + 3 + statusWidth + 3 + assignedWidth + 3 + createdWidth)) + '\n';
+  output += chalk.gray('-'.repeat(taskIdWidth + 3 + typeWidth + 3 + statusWidth + 3 + assignedWidth + 3 + statusTimeWidth)) + '\n';
   
   for (const task of tasks) {
     const taskId = task.id.substring(0, 10); 
     const taskType = task.typeName || task.typeId || '-';
     const status = formatTaskStatus(task.status);
     const assignedTo = task.assignedTo || '-';
-    const created = formatRelativeTime(task.createdAt);
+    const statusTime = formatLeaseStatus(task);
     
     output += taskId.padEnd(taskIdWidth) + ' | ' +
               taskType.padEnd(typeWidth) + ' | ' +
               padEndVisual(status, statusWidth) + ' | ' +
               assignedTo.padEnd(assignedWidth) + ' | ' +
-              created.padEnd(createdWidth) + '\n';
+              padEndVisual(statusTime, statusTimeWidth) + '\n';
   }
   
   if (pagination && pagination.limit < pagination.total) {
